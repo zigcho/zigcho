@@ -2865,6 +2865,96 @@ test "stable submission token coverage" {
     std.testing.refAllDecls(@import("stable_score_auth.zig"));
 }
 
+test "serverstats stays admin only and private through Stable and lazer" {
+    const Status = struct {
+        fn write(_: *anyopaque, writer: *std.Io.Writer) !void {
+            try writer.writeAll("server | up 1h\nram | rss 20 MiB");
+        }
+    };
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&path_buf, ".zig-cache/tmp/{s}/serverstats.db", .{tmp.sub_path});
+    var store = try storage.Store.open(std.testing.allocator, std.testing.io, path);
+    defer store.close();
+    try store.migrate();
+    _ = try store.register("ari", "ari@example.invalid", "00000000000000000000000000000000");
+    var sessions = sessions_mod.Sessions.init(std.testing.allocator, std.testing.io);
+    defer sessions.deinit();
+    sessions.status_provider = .{ .context = &store, .write = Status.write };
+    try store.exec("UPDATE users SET privileges=privileges|(1<<13) WHERE safe_name='ari'");
+    _ = try sessions.createBot((try store.userById(std.testing.allocator, 3)).?);
+    var login = try bancho.login(std.testing.allocator, &store, &sessions, ari_stable_login, .{ 'A', 'U' }, 0, 0);
+    defer login.deinit();
+    const sender = sessions.byToken(login.token).?;
+    sender.user.privileges |= 1 << 13;
+    const request = try clientMessagePacket(std.testing.allocator, .send_public_message, "ari", "!serverstats", "#osu", sender.user.id);
+    defer std.testing.allocator.free(request);
+    const response = (try bancho.pollByToken(std.testing.allocator, &store, &sessions, login.token, request)).?;
+    defer std.testing.allocator.free(response);
+    try expectMessageContains(response, "ram | rss 20 MiB");
+    var reader: protocol.Reader = .{ .data = response };
+    while (try reader.next()) |packet| {
+        if (@intFromEnum(packet.id) != @intFromEnum(protocol.ServerPacket.send_message)) continue;
+        var payload: protocol.PayloadReader = .{ .data = packet.payload };
+        _ = try payload.string();
+        const text = try payload.string();
+        const target = try payload.string();
+        if (std.mem.startsWith(u8, text, "server |") or std.mem.startsWith(u8, text, "ram |")) try std.testing.expectEqualStrings("ari", target);
+    }
+    var bot = lazer_bot.Manager.init(std.testing.allocator, std.testing.io);
+    defer bot.deinit();
+    const lazer_reply = try bot.replyOwned(&store, &sessions, sender.user, "!serverstats", false);
+    defer std.testing.allocator.free(lazer_reply);
+    try std.testing.expect(std.mem.indexOf(u8, lazer_reply, "ram | rss 20 MiB") != null);
+    sender.user.privileges = 3;
+    const denied_reply = try bot.replyOwned(&store, &sessions, sender.user, "!serverstats", false);
+    defer std.testing.allocator.free(denied_reply);
+    try std.testing.expectEqualStrings("you do not have permission for that", denied_reply);
+}
+
+test "serverstats provider binds the application" {
+    var app: @import("server/app.zig").App = undefined;
+    const provider = @import("server_status.zig").bind(&app);
+    try std.testing.expectEqual(@as(*anyopaque, @ptrCast(&app)), provider.context);
+}
+
+test "stable geolocation refresh sends corrected presence without changing mods" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&path_buf, ".zig-cache/tmp/{s}/geo-refresh.db", .{tmp.sub_path});
+    var store = try storage.Store.open(std.testing.allocator, std.testing.io, path);
+    defer store.close();
+    try store.migrate();
+    const id = try store.register("ari", "ari@example.invalid", "00000000000000000000000000000000");
+    var sessions = sessions_mod.Sessions.init(std.testing.allocator, std.testing.io);
+    defer sessions.deinit();
+    var login = try bancho.login(std.testing.allocator, &store, &sessions, ari_stable_login, .{ 'A', 'U' }, 0, 0);
+    defer login.deinit();
+    const session = sessions.byToken(login.token).?;
+    session.mods = 128;
+    session.queue.clearRetainingCapacity();
+    try bancho.updateGeo(std.testing.allocator, &store, &sessions, login.token, 138.6, -34.9);
+    try std.testing.expectEqual(@as(i32, 128), session.mods);
+    try std.testing.expectEqual(@as(f32, 138.6), session.longitude);
+    try std.testing.expectEqual(@as(f32, -34.9), session.latitude);
+    var reader: protocol.Reader = .{ .data = session.queue.items };
+    const packet = (try reader.next()).?;
+    try std.testing.expectEqual(@intFromEnum(protocol.ServerPacket.user_presence), @intFromEnum(packet.id));
+    var payload: protocol.PayloadReader = .{ .data = packet.payload };
+    try std.testing.expectEqual(id, try payload.int(i32));
+    _ = try payload.string();
+    for (0..3) |_| _ = try payload.byte();
+    try std.testing.expectEqual(@as(f32, 138.6), @as(f32, @bitCast(try payload.int(u32))));
+    try std.testing.expectEqual(@as(f32, -34.9), @as(f32, @bitCast(try payload.int(u32))));
+    session.presence_suppressed = true;
+    session.queue.clearRetainingCapacity();
+    try bancho.updateGeo(std.testing.allocator, &store, &sessions, login.token, 10, 20);
+    try std.testing.expectEqual(@as(usize, 0), session.queue.items.len);
+    try std.testing.expectEqual(@as(f32, 138.6), session.longitude);
+}
+
 test "stable score response reports the committed one based leaderboard rank" {
     const score: stable_score.Submission = .{
         .map_md5 = "0123456789abcdef0123456789abcdef",

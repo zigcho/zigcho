@@ -162,6 +162,7 @@ pub fn run(init: std.process.Init) !void {
         .http_long_request_timeout_seconds = config.http_long_request_timeout_seconds,
     };
     app.map_sync.bindOsuApiKey(config.osu_api_key);
+    app.sessions.status_provider = @import("../server_status.zig").bind(&app);
     var kai = (try app.store.userById(allocator, 3)) orelse return error.SystemBotMissing;
     try app.lazer_multiplayer.bindStore(&app.store);
     app.lazer_multiplayer.bindBeatmapSync(&app.map_sync);

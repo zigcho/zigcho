@@ -287,6 +287,7 @@ const StablePollCapture = struct {
 
 fn cloneCommandWorld(allocator: std.mem.Allocator, source: *const sessions_mod.Sessions) !sessions_mod.Sessions {
     var clone = sessions_mod.Sessions.init(allocator, source.io);
+    clone.status_provider = source.status_provider;
     errdefer clone.deinit();
     for (source.items.items) |original| {
         var user = original.user;
@@ -2775,6 +2776,31 @@ pub fn disconnectRestrictedUser(allocator: std.mem.Allocator, sessions: *session
     defer sessions.mutex.unlock(sessions.io);
     const session = sessions.byUser(user_id) orelse return;
     if (!session.is_bot) removeSessionLocked(allocator, sessions, session);
+}
+
+pub fn updateGeo(allocator: std.mem.Allocator, store: *storage.Store, sessions: *sessions_mod.Sessions, token: []const u8, longitude: f32, latitude: f32) !void {
+    if (!std.math.isFinite(longitude) or !std.math.isFinite(latitude) or @abs(longitude) > 180 or @abs(latitude) > 90) return;
+    var snapshot = blk: {
+        sessions.mutex.lockUncancelable(sessions.io);
+        defer sessions.mutex.unlock(sessions.io);
+        const session = sessions.byToken(token) orelse return;
+        if (session.presence_suppressed or session.user.restricted or !session.user.show_country) return;
+        break :blk try SessionSnapshot.init(allocator, session);
+    };
+    defer snapshot.deinit();
+    snapshot.longitude = longitude;
+    snapshot.latitude = latitude;
+    const current_stats = try presenceStats(store, &snapshot);
+    var event = protocol.Writer.init(allocator);
+    defer event.deinit();
+    try presence(&event, &snapshot, current_stats.global_rank);
+    sessions.mutex.lockUncancelable(sessions.io);
+    defer sessions.mutex.unlock(sessions.io);
+    const current = sessions.byToken(token) orelse return;
+    if (current.generation != snapshot.generation or current.mode != snapshot.mode or current.mods != snapshot.mods or current.presence_suppressed or current.user.restricted or !current.user.show_country) return;
+    current.longitude = longitude;
+    current.latitude = latitude;
+    try sessions.broadcast(event.bytes(), null);
 }
 
 pub fn publishStats(allocator: std.mem.Allocator, store: *storage.Store, sessions: *sessions_mod.Sessions, user_id: i32, mode: u8, mods: i32) !void {

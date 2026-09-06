@@ -132,6 +132,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
                 return respond(req, .ok, "application/octet-stream", restart.bytes(), &.{});
             };
             const maybe_bytes = (poll: {
+                if (client_ip_owned) |ip| @import("../http/geolocation.zig").refresh(self, token, ip);
                 const mutex = self.gameSessionMutex(poll_user_id);
                 mutex.lockUncancelable(self.store.io);
                 defer mutex.unlock(self.store.io);

@@ -75,6 +75,7 @@ pub const Session = struct {
     spectating_user_id: ?i32 = null,
     longitude: f32 = 0,
     latitude: f32 = 0,
+    geo_retry_at: i64 = 0,
 
     pub fn info(self: *const Session) []const u8 {
         return self.info_text[0..self.info_len];
@@ -145,6 +146,7 @@ pub const Session = struct {
 };
 
 pub const Sessions = struct {
+    status_provider: ?@import("server_status.zig").Provider = null,
     allocator: std.mem.Allocator,
     io: std.Io,
     mutex: @import("telemetry.zig").Mutex(.stable_sessions) = .init,

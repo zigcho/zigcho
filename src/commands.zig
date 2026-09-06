@@ -36,6 +36,23 @@ pub fn handleCommand(allocator: std.mem.Allocator, store: *storage.Store, sessio
     const cmd = body[0..separator];
     const args = if (separator == body.len) "" else std.mem.trim(u8, body[separator + 1 ..], " \t");
 
+    if (std.ascii.eqlIgnoreCase(cmd, "serverstats") or std.ascii.eqlIgnoreCase(cmd, "serverstatus")) {
+        if (sender.user.restricted or sender.user.privileges & (administrator | developer) == 0)
+            return try denied(allocator, sessions, sender, sender.user.name, out);
+        const provider = sessions.status_provider orelse {
+            try reply(allocator, sessions, sender, sender.user.name, out, "server stats aren't available here");
+            return .handled;
+        };
+        var buffer: [4096]u8 = undefined;
+        var report = std.Io.Writer.fixed(&buffer);
+        try provider.write(provider.context, &report);
+        var lines = std.mem.splitScalar(u8, report.buffered(), '\n');
+        while (lines.next()) |line| if (line.len != 0) {
+            try reply(allocator, sessions, sender, sender.user.name, out, line);
+        };
+        return .handled;
+    }
+
     if (std.ascii.eqlIgnoreCase(cmd, "help") or std.ascii.eqlIgnoreCase(cmd, "h")) {
         var message: []const u8 = "player: /np !with <mods acc% misses> !pin !unpin !roll [max] !online !stats [name] !request !mapstate";
         if (has(sender, moderator)) message = "player: /np !with !pin !unpin !roll !online !stats !request !mapstate | mod: !user !silence !unsilence !kick !addnote !notes";
@@ -43,6 +60,8 @@ pub fn handleCommand(allocator: std.mem.Allocator, store: *storage.Store, sessio
         if (has(sender, administrator)) message = "player: /np !with !pin !unpin !roll !online !stats !request !mapstate | mod: !user !silence !unsilence !kick !addnote !notes | bn: !requests !nominate !mapstatus !veto !qualify !rank !approve !love | admin: !rollback !restrict !unrestrict !announce !alert !lock !unlock";
         if (has(sender, developer)) message = "player: /np !with !pin !unpin !roll !online !stats !request !mapstate | mod: !user !silence !unsilence !kick !addnote !notes | bn: !requests !nominate !mapstatus !veto !qualify !rank !approve !love | admin: !rollback !restrict !unrestrict !announce !alert !lock !unlock | dev: !addpriv !rmpriv";
         try reply(allocator, sessions, sender, reply_target, out, message);
+        if (sender.user.privileges & (administrator | developer) != 0)
+            try reply(allocator, sessions, sender, sender.user.name, out, "admin: !serverstats for uptime, cpu, ram and dependencies");
         return .handled;
     }
     if (std.ascii.eqlIgnoreCase(cmd, "with")) {

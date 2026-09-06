@@ -5,6 +5,27 @@ pub const Result = struct { lon: f32 = 0, lat: f32 = 0 };
 pub const max_concurrent = 4;
 pub const timeout_ms = 1000;
 
+pub fn refresh(self: anytype, token: []const u8, ip: []const u8) void {
+    const now = std.Io.Clock.real.now(self.store.io).toSeconds();
+    self.sessions.mutex.lockUncancelable(self.store.io);
+    const retry = blk: {
+        const session = self.sessions.byToken(token) orelse break :blk false;
+        if (session.presence_suppressed or session.is_bot or session.user.restricted or !session.user.show_country) break :blk false;
+        break :blk claimRetry(session, now);
+    };
+    self.sessions.mutex.unlock(self.store.io);
+    if (!retry) return;
+    const result = lookup(self, ip);
+    if (result.lon == 0 and result.lat == 0) return;
+    @import("../../bancho.zig").updateGeo(self.allocator, &self.store, &self.sessions, token, result.lon, result.lat) catch {};
+}
+
+fn claimRetry(session: anytype, now: i64) bool {
+    if (session.longitude != 0 or session.latitude != 0 or now < session.geo_retry_at) return false;
+    session.geo_retry_at = now + 30;
+    return true;
+}
+
 pub fn lookup(self: anytype, ip: []const u8) Result {
     _ = std.Io.net.IpAddress.parse(ip, 0) catch return .{};
     return lookupBounded(self, ip, timeout_ms);
@@ -61,6 +82,16 @@ test "geolocation bounds coordinates and ignores failed responses" {
     try std.testing.expectEqualDeep(Result{ .lat = -34.9, .lon = 138.6 }, parse("success\n-34.9\n138.6\n"));
     for ([_][]const u8{ "fail\n", "success\nNaN\n0", "success\n0\ninf", "success\n91\n0", "success\n0\n181", "success\n0" }) |body|
         try std.testing.expectEqualDeep(Result{}, parse(body));
+}
+
+test "geolocation retries only missing coordinates with a cooldown" {
+    var session: struct { longitude: f32 = 0, latitude: f32 = 0, geo_retry_at: i64 = 0 } = .{};
+    try std.testing.expect(claimRetry(&session, 100));
+    try std.testing.expect(!claimRetry(&session, 101));
+    try std.testing.expect(claimRetry(&session, 130));
+    session.longitude = 138.6;
+    session.latitude = -34.9;
+    try std.testing.expect(!claimRetry(&session, 200));
 }
 
 test "geolocation cancels slow requests and rejects excess work without queuing" {
