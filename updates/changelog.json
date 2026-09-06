@@ -8,6 +8,12 @@
       "created_at": "2026-09-06T11:10:00Z",
       "updates": [
         {
+          "name": "2026-09-06-stable-reconnect-window.md",
+          "created_at": "2026-09-06T11:25:00Z",
+          "commit": "",
+          "sha256": "114f78b2a0e39ea85dd26768e8cf2c089177a2742741f970b8aab674bb46b3e6"
+        },
+        {
           "name": "2026-09-06-serverstats-and-location.md",
           "created_at": "2026-09-06T11:10:00Z",
           "commit": "",

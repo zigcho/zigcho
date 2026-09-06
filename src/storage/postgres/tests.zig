@@ -2174,7 +2174,7 @@ test "postgres stable score grace is client bound expiring and one time" {
     const checksum_one = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const checksum_two = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    try store.rotateStableScoreSession(user_id, &token_one, binding, 1_000, 300);
+    try store.rotateStableScoreSession(user_id, &token_one, binding, 1, 300);
     try std.testing.expectEqual(StableScoreGraceResult.current_not_grace, try store.consumeStableScoreGrace(&token_one, user_id, binding, checksum_one, 1_001));
     try std.testing.expectEqual(StableScoreGraceResult.foreign, try store.consumeStableScoreGrace(&token_one, foreign_id, binding, checksum_one, 1_001));
     try std.testing.expectEqual(StableScoreGraceResult.unknown, try store.consumeStableScoreGrace(&unknown, user_id, binding, checksum_one, 1_001));

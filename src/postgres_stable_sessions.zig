@@ -57,7 +57,7 @@ pub fn rotate(allocator: std.mem.Allocator, pool: *postgres.Pool, user_id: i32, 
     // reconnect retires an older unused claim instead of growing a token chain.
     var revoke_old_grace = try postgres.queryParams(allocator, lease.conn, "UPDATE zigcho.stable_score_sessions SET revoked_at=$2 WHERE user_id=$1 AND grace_expires_at IS NOT NULL AND consumed_at IS NULL AND revoked_at IS NULL", &.{ user, now_text });
     revoke_old_grace.deinit();
-    var grant_grace = try postgres.queryParams(allocator, lease.conn, "UPDATE zigcho.stable_score_sessions SET grace_expires_at=$2 WHERE user_id=$1 AND grace_expires_at IS NULL AND revoked_at IS NULL", &.{ user, expiry });
+    var grant_grace = try postgres.queryParams(allocator, lease.conn, "UPDATE zigcho.stable_score_sessions SET issued_at=$3,grace_expires_at=$2 WHERE user_id=$1 AND grace_expires_at IS NULL AND revoked_at IS NULL", &.{ user, expiry, now_text });
     grant_grace.deinit();
     var inserted = try postgres.queryParams(allocator, lease.conn, "INSERT INTO zigcho.stable_score_sessions(token_hash,user_id,version_date,hardware_digest,issued_at) VALUES($1,$2,$3,$4,$5)", &.{ token_hash, user, &binding.version_date, hardware, now_text });
     inserted.deinit();
