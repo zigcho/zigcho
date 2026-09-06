@@ -564,7 +564,6 @@ test "config values stay owned after the source buffer changes" {
             "object_storage_endpoint=https://sin1.contabostorage.com\n" ++
             "object_storage_bucket=data\n" ++
             "object_storage_region=default\n" ++
-            "object_storage_proxy_port=40000\n" ++
             "object_storage_access_key_id=object-access\n" ++
             "object_storage_secret_access_key=object-secret\n" ++
             "osu_api_key=final-key\n",
@@ -592,7 +591,6 @@ test "config values stay owned after the source buffer changes" {
     try std.testing.expectEqualStrings("https://sin1.contabostorage.com", config.object_storage_endpoint);
     try std.testing.expectEqualStrings("data", config.object_storage_bucket);
     try std.testing.expectEqualStrings("default", config.object_storage_region);
-    try std.testing.expectEqual(@as(u16, 40000), config.object_storage_proxy_port);
     try std.testing.expectEqualStrings("object-access", config.object_storage_access_key_id);
     try std.testing.expectEqualStrings("object-secret", config.object_storage_secret_access_key);
 }

@@ -1,0 +1,15 @@
+[Unit]
+Description=zigcho storage route
+After=network-online.target zigcho-storage-relay.service
+Wants=network-online.target zigcho-storage-relay.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh /opt/zigcho/network/storage-egress.sh start
+ExecStop=/bin/sh /opt/zigcho/network/storage-egress.sh stop
+TimeoutStartSec=15s
+TimeoutStopSec=5s
+
+[Install]
+WantedBy=multi-user.target

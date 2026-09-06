@@ -1,0 +1,9 @@
+[Unit]
+Description=refresh zigcho storage addresses
+Requires=zigcho-storage-route.service
+After=zigcho-storage-route.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /opt/zigcho/network/storage-egress.sh refresh
+TimeoutStartSec=15s

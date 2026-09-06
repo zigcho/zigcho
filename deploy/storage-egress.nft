@@ -1,0 +1,10 @@
+table ip zigcho_storage_egress {
+    set upstream {
+        type ipv4_addr
+        elements = { 103.164.55.84, 103.164.55.85 }
+    }
+    chain output {
+        type nat hook output priority -110; policy accept;
+        meta skuid "zigcho" ip daddr @upstream tcp dport 443 counter redirect to :40001
+    }
+}

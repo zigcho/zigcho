@@ -1,0 +1,20 @@
+[Unit]
+Description=zigcho storage TLS passthrough
+After=network-online.target zigcho-storage-egress.service
+Wants=network-online.target zigcho-storage-egress.service
+
+[Service]
+DynamicUser=yes
+User=zigcho-storage-relay
+ExecStart=/opt/zigcho/network/socat-1.8.0.0/usr/bin/socat -T 300 TCP4-LISTEN:40001,bind=127.0.0.1,reuseaddr,fork,max-children=64 PROXY:127.0.0.1:sin1.contabostorage.com:443,proxyport=40000,connect-timeout=5
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

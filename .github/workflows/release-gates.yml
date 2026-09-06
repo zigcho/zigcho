@@ -417,8 +417,6 @@ jobs:
             sleep 1
           done
           printf '\nobject_storage_proxy_port=19022\n' >>"$runtime/config.ini"
-          (cd "$runtime" && "$binary" object-put backups/proxy-fixture.dump source.bin && "$binary" object-get backups/proxy-fixture.dump proxy-restored.bin)
-          cmp "$runtime/source.bin" "$runtime/proxy-restored.bin"
           # Exercise the actual operational multipart path, above its 8 MiB cutoff.
           openssl rand -out "$runtime/multipart.dump" 25165841
           transfer="$GITHUB_WORKSPACE/artifacts/server/tools/backup-transfer.sh"

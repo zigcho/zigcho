@@ -17,7 +17,6 @@ pub fn configuredObjectStore(config: config_mod.Config) r2.Storage {
         .access_key_id = config.object_storage_access_key_id,
         .secret_access_key = config.object_storage_secret_access_key,
         .region = config.object_storage_region,
-        .proxy_port = config.object_storage_proxy_port,
     };
 }
 

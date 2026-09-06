@@ -19,7 +19,6 @@ pub const Config = struct {
     object_storage_region: []u8,
     object_storage_access_key_id: []u8,
     object_storage_secret_access_key: []u8,
-    object_storage_proxy_port: u16 = 0,
     beatmap_cache_max_bytes: u64,
     beatmap_media_cache_max_bytes: u64,
     irc_bind: []u8,
@@ -145,8 +144,6 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) !Config {
             try result.replace(&result.object_storage_access_key_id, value);
         } else if (std.mem.eql(u8, key, "object_storage_secret_access_key")) {
             try result.replace(&result.object_storage_secret_access_key, value);
-        } else if (std.mem.eql(u8, key, "object_storage_proxy_port")) {
-            result.object_storage_proxy_port = try std.fmt.parseInt(u16, value, 10);
         } else if (std.mem.eql(u8, key, "beatmap_cache_max_bytes")) {
             const parsed = std.fmt.parseInt(u64, value, 10) catch continue;
             if (parsed >= 128 * 1024 * 1024 and parsed <= 128 * 1024 * 1024 * 1024)

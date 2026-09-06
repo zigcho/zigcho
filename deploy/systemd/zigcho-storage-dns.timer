@@ -1,0 +1,10 @@
+[Unit]
+Description=refresh zigcho storage addresses
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=zigcho-storage-dns.service
+
+[Install]
+WantedBy=timers.target
