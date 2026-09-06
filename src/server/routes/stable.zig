@@ -507,7 +507,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             };
         };
         switch (score_auth) {
-            .exact => {},
+            .exact, .client_bound => {},
             .grace => std.log.info("event=stable_score_grace_token_claimed user_id={d} checksum={s}", .{ user.id, score.online_checksum }),
             .missing => {
                 std.log.warn("stable score rejected: reason=missing_session_token body_bytes={d}", .{body.len});

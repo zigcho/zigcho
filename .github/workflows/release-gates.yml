@@ -235,7 +235,7 @@ jobs:
             "zigcho-release-gate:${GITHUB_SHA}" \
             zig build test -Doptimize=ReleaseSafe
 
-      - name: run the existing-PB score chart correction
+      - name: run focused Stable submission corrections
         if: needs.classify.outputs.is_hotfix != 'true' && github.event_name == 'workflow_dispatch' && inputs.test_scope == 'score-chart'
         timeout-minutes: 12
         env:
@@ -248,7 +248,7 @@ jobs:
             docker run --rm --network host \
               -e "ZIGCHO_TEST_POSTGRES_CHART_URL=host=127.0.0.1 port=5432 dbname=$database_name user=zigcho password=zigcho-gate connect_timeout=5" \
               "zigcho-release-gate:${GITHUB_SHA}" \
-              zig build test "-Doptimize=$optimization" -Dtest-filter="stable score response" -Dtest-filter="stable chart decimals"
+              zig build test "-Doptimize=$optimization" -Dtest-filter="stable score response" -Dtest-filter="stable chart decimals" -Dtest-filter="stable submission token" -Dtest-filter="score authorization binds"
           done
 
       - name: run focused correction tests

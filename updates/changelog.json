@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 56,
+      "version": "2026.906.0",
+      "display_version": "stable submit fix",
+      "created_at": "2026-09-06T11:00:00Z",
+      "updates": [
+        {
+          "name": "2026-09-06-stable-submit-token.md",
+          "created_at": "2026-09-06T11:00:00Z",
+          "commit": "",
+          "sha256": "3705f52a42935cb3c65f51022013a9d345b850ba6e3e2aaa37bb2d6a91be145e"
+        }
+      ]
+    },
+    {
       "id": 55,
       "version": "2026.905.5",
       "display_version": "stable cleanup",

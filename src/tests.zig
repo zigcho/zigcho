@@ -2861,6 +2861,10 @@ test "stable login keeps replayed private mail unread until the client polls" {
     try std.testing.expectEqual(@as(usize, 0), read.len);
 }
 
+test "stable submission token coverage" {
+    std.testing.refAllDecls(@import("stable_score_auth.zig"));
+}
+
 test "stable score response reports the committed one based leaderboard rank" {
     const score: stable_score.Submission = .{
         .map_md5 = "0123456789abcdef0123456789abcdef",
