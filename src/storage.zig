@@ -666,6 +666,7 @@ pub const Store = struct {
     pub const beatmapSetExists = @import("storage/sqlite/beatmaps/archives.zig").beatmapSetExists;
 
     pub const beatmapSetIdsMissingArchives = @import("storage/sqlite/beatmaps/archives.zig").beatmapSetIdsMissingArchives;
+    pub const recordMirrorFailure = @import("storage/sqlite/beatmaps/archives.zig").recordMirrorFailure;
 
     pub const beatmapArchiveIdsMissingSize = @import("storage/sqlite/beatmaps/archives.zig").beatmapArchiveIdsMissingSize;
 

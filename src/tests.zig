@@ -564,6 +564,7 @@ test "config values stay owned after the source buffer changes" {
             "object_storage_endpoint=https://sin1.contabostorage.com\n" ++
             "object_storage_bucket=data\n" ++
             "object_storage_region=default\n" ++
+            "object_storage_proxy_port=40000\n" ++
             "object_storage_access_key_id=object-access\n" ++
             "object_storage_secret_access_key=object-secret\n" ++
             "osu_api_key=final-key\n",
@@ -591,6 +592,7 @@ test "config values stay owned after the source buffer changes" {
     try std.testing.expectEqualStrings("https://sin1.contabostorage.com", config.object_storage_endpoint);
     try std.testing.expectEqualStrings("data", config.object_storage_bucket);
     try std.testing.expectEqualStrings("default", config.object_storage_region);
+    try std.testing.expectEqual(@as(u16, 40000), config.object_storage_proxy_port);
     try std.testing.expectEqualStrings("object-access", config.object_storage_access_key_id);
     try std.testing.expectEqualStrings("object-secret", config.object_storage_secret_access_key);
 }
@@ -1182,6 +1184,16 @@ test "beatmap mirror serves verified cache hits and tracks stored bytes" {
     const missing = try store.beatmapSetIdsMissingArchives(std.testing.allocator, 10);
     defer std.testing.allocator.free(missing);
     try std.testing.expectEqualSlices(i32, &.{900000001}, missing);
+    try store.exec("INSERT INTO beatmaps(id,set_id,md5,artist,title,version,creator,status) VALUES(3,900000002,'cccccccccccccccccccccccccccccccc','c','c','c','c',3),(4,900000001,'dddddddddddddddddddddddddddddddd','b','b','other','b',3)");
+    try store.recordMirrorFailure(900000001, "IdMismatch", std.Io.Clock.real.now(std.testing.io).toSeconds());
+    const ready = try store.beatmapSetIdsMissingArchives(std.testing.allocator, 10);
+    defer std.testing.allocator.free(ready);
+    try std.testing.expectEqualSlices(i32, &.{900000002}, ready);
+    try std.testing.expectEqual(@as(i64, 2), try store.beatmapMirrorPendingCount());
+    try store.exec("UPDATE beatmap_hydration_failures SET next_retry_at=unixepoch()-1 WHERE set_id=900000001");
+    const retry = try store.beatmapSetIdsMissingArchives(std.testing.allocator, 10);
+    defer std.testing.allocator.free(retry);
+    try std.testing.expectEqual(@as(usize, 2), retry.len);
 }
 
 test "legacy credentials authenticate and upgrade outside the read lock" {

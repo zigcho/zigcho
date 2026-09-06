@@ -2,6 +2,7 @@
 Description=zigcho beatmap mirror fill worker
 After=network-online.target postgresql.service zigcho.service
 Wants=network-online.target postgresql.service
+PartOf=zigcho.service
 
 [Service]
 Type=simple

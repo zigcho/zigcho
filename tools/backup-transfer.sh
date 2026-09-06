@@ -44,6 +44,16 @@ RCLONE_CONFIG_ZIGCHOBACKUP_ACCESS_KEY_ID=$(setting object_storage_access_key_id)
 RCLONE_CONFIG_ZIGCHOBACKUP_SECRET_ACCESS_KEY=$(setting object_storage_secret_access_key)
 RCLONE_CONFIG_ZIGCHOBACKUP_REGION=$(setting object_storage_region || printf auto)
 bucket=$(setting object_storage_bucket)
+proxy_port=$(setting object_storage_proxy_port || printf 0)
+case "$proxy_port" in ''|*[!0-9]*) echo 'invalid storage proxy port' >&2; exit 1;; esac
+[ "$proxy_port" -le 65535 ] || { echo 'invalid storage proxy port' >&2; exit 1; }
+if [ "$proxy_port" -gt 0 ]; then
+  HTTPS_PROXY="http://127.0.0.1:$proxy_port"
+  https_proxy=$HTTPS_PROXY
+  NO_PROXY=
+  no_proxy=$NO_PROXY
+  export HTTPS_PROXY https_proxy NO_PROXY no_proxy
+fi
 [ -n "$bucket" ] && [ -n "$RCLONE_CONFIG_ZIGCHOBACKUP_ACCESS_KEY_ID" ] && [ -n "$RCLONE_CONFIG_ZIGCHOBACKUP_SECRET_ACCESS_KEY" ] || { echo 'backup storage is not configured' >&2; exit 1; }
 case "$bucket" in *[!A-Za-z0-9._-]*) echo 'invalid backup bucket' >&2; exit 1;; esac
 case "$RCLONE_CONFIG_ZIGCHOBACKUP_ENDPOINT" in https://*) ;; *) echo 'backup storage requires HTTPS' >&2; exit 1;; esac

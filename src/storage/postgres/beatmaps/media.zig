@@ -55,12 +55,27 @@ pub fn beatmapSetIdsMissingArchives(self: anytype, allocator: std.mem.Allocator,
     const limit_text = try std.fmt.bufPrint(&limit_buf, "{d}", .{limit});
     var lease = self.pool.acquire();
     defer lease.release();
-    var result = try postgres.queryParams(self.allocator, lease.conn, "SELECT b.set_id FROM zigcho.beatmaps b LEFT JOIN zigcho.beatmap_archives a ON a.set_id=b.set_id WHERE b.set_id>0 AND a.set_id IS NULL GROUP BY b.set_id ORDER BY max(b.last_update) DESC,b.set_id DESC LIMIT $1", &.{limit_text});
+    var result = try postgres.queryParams(self.allocator, lease.conn, "SELECT b.set_id FROM zigcho.beatmaps b LEFT JOIN zigcho.beatmap_archives a ON a.set_id=b.set_id WHERE b.set_id>0 AND a.set_id IS NULL AND b.set_id NOT IN(SELECT set_id FROM zigcho.beatmap_hydration_failures WHERE next_retry_at>extract(epoch FROM statement_timestamp())::bigint) GROUP BY b.set_id ORDER BY max(b.last_update) DESC,b.set_id DESC LIMIT $1", &.{limit_text});
     defer result.deinit();
     const ids = try allocator.alloc(i32, result.rows());
     errdefer allocator.free(ids);
     for (ids, 0..) |*id, row| id.* = try result.int(i32, row, 0);
     return ids;
+}
+
+pub fn recordMirrorFailure(self: anytype, set_id: i32, reason: []const u8, now: i64) !void {
+    var md5: [32]u8 = undefined;
+    {
+        var set_buf: [24]u8 = undefined;
+        const set = try std.fmt.bufPrint(&set_buf, "{d}", .{set_id});
+        var lease = self.pool.acquire();
+        defer lease.release();
+        var row = try postgres.queryParams(self.allocator, lease.conn, "SELECT md5 FROM zigcho.beatmaps WHERE set_id=$1 ORDER BY id LIMIT 1", &.{set});
+        defer row.deinit();
+        if (row.rows() == 0 or row.value(0, 0).len != md5.len) return error.UnknownBeatmapSet;
+        @memcpy(&md5, row.value(0, 0));
+    }
+    try self.recordHydrationFailure(&md5, set_id, reason, now);
 }
 
 pub fn beatmapArchiveIdsMissingSize(self: anytype, allocator: std.mem.Allocator, limit: u16) ![]i32 {

@@ -18,6 +18,7 @@ on:
           - focused
           - stable
           - score-chart
+          - mirror
   push:
     branches:
       - main
@@ -252,6 +253,22 @@ jobs:
               zig build test "-Doptimize=$optimization" -Dtest-filter="stable score response" -Dtest-filter="stable chart decimals" -Dtest-filter="stable submission token" -Dtest-filter="score authorization binds" -Dtest-filter="postgres stable score grace" -Dtest-filter=geolocation -Dtest-filter=serverstats
           done
 
+      - name: run focused mirror corrections
+        if: needs.classify.outputs.is_hotfix != 'true' && github.event_name == 'workflow_dispatch' && inputs.test_scope == 'mirror'
+        timeout-minutes: 8
+        env:
+          PGPASSWORD: zigcho-gate
+        run: |
+          set -euo pipefail
+          for optimization in Debug ReleaseSafe; do
+            database_name="zigcho_mirror_$(printf '%s' "$optimization" | tr '[:upper:]' '[:lower:]')"
+            createdb -h 127.0.0.1 -U zigcho "$database_name"
+            docker run --rm --network host \
+              -e "ZIGCHO_TEST_POSTGRES_STORE_URL=host=127.0.0.1 port=5432 dbname=$database_name user=zigcho password=zigcho-gate connect_timeout=5" \
+              "zigcho-release-gate:${GITHUB_SHA}" \
+              zig build test "-Doptimize=$optimization" -Dtest-filter=mirror -Dtest-filter=r2 -Dtest-filter="object ranges" -Dtest-filter="config values"
+          done
+
       - name: run focused correction tests
         if: needs.classify.outputs.is_hotfix != 'true' && github.event_name == 'workflow_dispatch' && inputs.test_scope == 'focused'
         shell: bash
@@ -373,14 +390,15 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq rclone
+          sudo apt-get install -y -qq rclone tinyproxy
           runtime=$(mktemp -d "$RUNNER_TEMP/backup-roundtrip.XXXXXX")
           cert_dir=$(mktemp -d "$RUNNER_TEMP/backup-certs.XXXXXX")
           openssl req -x509 -newkey rsa:2048 -nodes -keyout "$cert_dir/private.key" -out "$cert_dir/public.crt" -days 1 -subj '/CN=localhost' -addext 'subjectAltName=IP:127.0.0.1,DNS:localhost' 2>/dev/null
           sudo cp "$cert_dir/public.crt" /usr/local/share/ca-certificates/zigcho-backup-fixture.crt
           sudo update-ca-certificates >/dev/null
           docker run -d --name zigcho-backup-objects --network host -v "$cert_dir:/root/.minio/certs:ro" -e MINIO_ROOT_USER=backup-fixture-access -e MINIO_ROOT_PASSWORD=backup-fixture-secret minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e server /data --address 127.0.0.1:19020 --console-address 127.0.0.1:19021
-          trap 'docker rm -f zigcho-backup-objects >/dev/null 2>&1 || true' EXIT
+          proxy_pid=
+          trap 'if [ -n "$proxy_pid" ]; then kill "$proxy_pid" >/dev/null 2>&1 || true; fi; docker rm -f zigcho-backup-objects >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail --silent https://127.0.0.1:19020/minio/health/live; then break; fi
             sleep 1
@@ -392,6 +410,15 @@ jobs:
           (cd "$runtime" && "$binary" object-put backups/fixture.dump source.bin && "$binary" object-get backups/fixture.dump restored.bin)
           cmp "$runtime/source.bin" "$runtime/restored.bin"
           sha256sum "$runtime/source.bin" "$runtime/restored.bin"
+          tinyproxy -d -c tools/fixtures/storage-proxy.conf >"$runtime/proxy.log" 2>&1 &
+          proxy_pid=$!
+          for attempt in $(seq 1 10); do
+            if curl --fail --silent --noproxy '' --proxy http://127.0.0.1:19022 https://localhost:19020/minio/health/live; then break; fi
+            sleep 1
+          done
+          printf '\nobject_storage_proxy_port=19022\n' >>"$runtime/config.ini"
+          (cd "$runtime" && "$binary" object-put backups/proxy-fixture.dump source.bin && "$binary" object-get backups/proxy-fixture.dump proxy-restored.bin)
+          cmp "$runtime/source.bin" "$runtime/proxy-restored.bin"
           # Exercise the actual operational multipart path, above its 8 MiB cutoff.
           openssl rand -out "$runtime/multipart.dump" 25165841
           transfer="$GITHUB_WORKSPACE/artifacts/server/tools/backup-transfer.sh"

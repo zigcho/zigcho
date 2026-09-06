@@ -17,6 +17,7 @@ pub fn configuredObjectStore(config: config_mod.Config) r2.Storage {
         .access_key_id = config.object_storage_access_key_id,
         .secret_access_key = config.object_storage_secret_access_key,
         .region = config.object_storage_region,
+        .proxy_port = config.object_storage_proxy_port,
     };
 }
 
@@ -165,18 +166,22 @@ pub fn mirrorWorkerCommand(allocator: std.mem.Allocator, io: std.Io, args: []con
         if (ids.len == 0) {
             allocator.free(ids);
             std.log.info("event=beatmap_mirror_worker_idle", .{});
-            std.Io.sleep(io, .fromSeconds(900), .awake) catch return true;
+            std.Io.sleep(io, .fromSeconds(30), .awake) catch return true;
             continue;
         }
         const set_id = ids[0];
         allocator.free(ids);
-        const mirrored = sync.prefetchMirrorArchive(&store, set_id) catch |err| {
+        const mirrored = sync.prepareMirrorArchive(&store, set_id, false) catch |err| {
             std.log.warn("event=beatmap_mirror_worker_failed set_id={d} error={t}", .{ set_id, err });
-            std.Io.sleep(io, .fromSeconds(30), .awake) catch return true;
+            store.recordMirrorFailure(set_id, @errorName(err), std.Io.Clock.real.now(io).toSeconds()) catch |record_error| {
+                std.log.warn("event=beatmap_mirror_worker_backoff_failed set_id={d} error={t}", .{ set_id, record_error });
+                std.Io.sleep(io, .fromSeconds(30), .awake) catch return true;
+                continue;
+            };
+            std.Io.sleep(io, .fromSeconds(1), .awake) catch return true;
             continue;
         };
-        allocator.free(mirrored.data);
-        std.log.info("event=beatmap_mirror_worker_stored set_id={d}", .{set_id});
+        std.log.info("event=beatmap_mirror_worker_stored set_id={d} bytes={d}", .{ set_id, mirrored.bytes });
         std.Io.sleep(io, .fromSeconds(1), .awake) catch return true;
     }
 }

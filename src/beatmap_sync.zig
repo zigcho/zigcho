@@ -15,6 +15,26 @@ const upstream_profile_limit = 128 * 1024;
 const upstream_profile_ttl_seconds: i64 = 24 * 60 * 60;
 pub const max_concurrent_hydrations = 4;
 
+fn parseVerifiedMap(contents: []const u8, wanted_md5: []const u8, map_id: i32, set_id: i32) !beatmap.Metadata {
+    if (map_id <= 0 or set_id <= 0) return error.IdMismatch;
+    const digest = beatmap.md5(contents);
+    if (!std.ascii.eqlIgnoreCase(&digest, wanted_md5)) return error.BeatmapHashMismatch;
+    var metadata = try beatmap.parseWithIds(contents, map_id, set_id);
+    metadata.id = map_id;
+    metadata.set_id = set_id;
+    return metadata;
+}
+
+test "mirror verified maps use canonical ids without changing file bytes" {
+    const contents = "osu file format v14\n[Metadata]\nBeatmapID:695520\nBeatmapSetID:107747\nArtist:test\nTitle:test\nCreator:test\nVersion:NORMAL\n[HitObjects]\n256,192,1000,1,0,0:0:0:0:\n";
+    const md5 = beatmap.md5(contents);
+    const metadata = try parseVerifiedMap(contents, &md5, 694108, 107747);
+    try std.testing.expectEqual(@as(i32, 694108), metadata.id);
+    try std.testing.expectEqual(@as(i32, 107747), metadata.set_id);
+    try std.testing.expectEqual(@as(i32, 695520), (try beatmap.parse(contents)).id);
+    try std.testing.expectError(error.BeatmapHashMismatch, parseVerifiedMap(contents, "0" ** 32, 694108, 107747));
+}
+
 const CheesegullMap = struct {
     ParentSetID: i32,
     BeatmapID: i32,
@@ -1044,11 +1064,10 @@ pub const Sync = struct {
         for (remote.maps, 0..) |remote_map, index| {
             const extracted = findExtractedOsu(osu_files, &remote_map.md5) orelse return error.MapsetIncomplete;
 
-            const metadata = beatmap.parseWithIds(extracted.contents, remote_map.beatmap_id, set_id) catch |err| {
+            const metadata = parseVerifiedMap(extracted.contents, &remote_map.md5, remote_map.beatmap_id, set_id) catch |err| {
                 std.log.warn("[hydrate] .osu parse failed map={d}: {t}", .{ remote_map.beatmap_id, err });
                 return err;
             };
-            if (metadata.id != remote_map.beatmap_id or metadata.set_id != set_id) return error.IdMismatch;
             const attributes = pp.calculate(extracted.contents, .{
                 .mode = metadata.mode,
                 .lazer = 0,
@@ -1108,9 +1127,7 @@ pub const Sync = struct {
         defer self.allocator.free(contents);
 
         const digest = beatmap.md5(contents);
-        if (!std.ascii.eqlIgnoreCase(&digest, wanted_md5)) return error.BeatmapHashMismatch;
-        const metadata = try beatmap.parseWithIds(contents, beatmap_id, set_id);
-        if (metadata.id != beatmap_id or metadata.set_id != set_id) return error.IdMismatch;
+        const metadata = try parseVerifiedMap(contents, wanted_md5, beatmap_id, set_id);
         const attributes = try pp.calculate(contents, .{
             .mode = metadata.mode,
             .lazer = 0,

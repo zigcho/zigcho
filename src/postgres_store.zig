@@ -236,6 +236,9 @@ pub const Store = struct {
     pub fn beatmapSetIdsMissingArchives(self: *Store, allocator: std.mem.Allocator, limit: u16) ![]i32 {
         return pg_beatmap_media.beatmapSetIdsMissingArchives(self, allocator, limit);
     }
+    pub fn recordMirrorFailure(self: *Store, set_id: i32, reason: []const u8, now: i64) !void {
+        return pg_beatmap_media.recordMirrorFailure(self, set_id, reason, now);
+    }
     pub fn beatmapArchiveIdsMissingSize(self: *Store, allocator: std.mem.Allocator, limit: u16) ![]i32 {
         return pg_beatmap_media.beatmapArchiveIdsMissingSize(self, allocator, limit);
     }

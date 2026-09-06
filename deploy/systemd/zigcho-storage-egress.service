@@ -1,0 +1,18 @@
+[Unit]
+Description=zigcho storage egress
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=LD_LIBRARY_PATH=/opt/zigcho/network/warp-2026.7.1377.0/usr/lib/x86_64-linux-gnu
+ExecStart=/opt/zigcho/network/warp-2026.7.1377.0/bin/warp-svc
+StateDirectory=cloudflare-warp
+RuntimeDirectory=cloudflare-warp
+LogsDirectory=cloudflare-warp
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

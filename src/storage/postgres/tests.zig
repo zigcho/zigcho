@@ -2151,6 +2151,38 @@ test "postgres credential and restriction commits revoke matching token families
     try std.testing.expectEqual(StableScoreGraceResult.revoked, try store.consumeStableScoreGrace(&restricted_stable, restricted_id, stable_binding, "cccccccccccccccccccccccccccccccc", stable_now + 1));
 }
 
+test "postgres mirror skips failed sets and retains retries across connections" {
+    const raw_conninfo = std.c.getenv("ZIGCHO_TEST_POSTGRES_STORE_URL") orelse return error.SkipZigTest;
+    var store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));
+    defer store.close();
+    try store.migrate();
+    {
+        var lease = store.pool.acquire();
+        defer lease.release();
+        try postgres.exec(lease.conn, "INSERT INTO zigcho.beatmaps(id,set_id,md5,artist,title,version,creator,status) VALUES(94000001,94000001,'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1','mirror','one','one','fixture',3),(94000002,94000002,'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb2','mirror','two','two','fixture',3),(94000003,94000001,'ccccccccccccccccccccccccccccccc3','mirror','one','three','fixture',3)");
+    }
+    try store.recordMirrorFailure(94000001, "IdMismatch", std.Io.Clock.real.now(std.testing.io).toSeconds());
+    var reopened = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));
+    defer reopened.close();
+    const ready = try reopened.beatmapSetIdsMissingArchives(std.testing.allocator, 10);
+    defer std.testing.allocator.free(ready);
+    try std.testing.expect(std.mem.indexOfScalar(i32, ready, 94000001) == null);
+    try std.testing.expect(std.mem.indexOfScalar(i32, ready, 94000002) != null);
+    {
+        var lease = store.pool.acquire();
+        defer lease.release();
+        try postgres.exec(lease.conn, "UPDATE zigcho.beatmap_hydration_failures SET next_retry_at=0 WHERE set_id=94000001");
+    }
+    const retry = try reopened.beatmapSetIdsMissingArchives(std.testing.allocator, 65535);
+    defer std.testing.allocator.free(retry);
+    try std.testing.expect(std.mem.indexOfScalar(i32, retry, 94000001) != null);
+    {
+        var lease = store.pool.acquire();
+        defer lease.release();
+        try postgres.exec(lease.conn, "DELETE FROM zigcho.beatmap_hydration_failures WHERE set_id=94000001; DELETE FROM zigcho.beatmaps WHERE id IN(94000001,94000002,94000003)");
+    }
+}
+
 test "postgres stable score grace is client bound expiring and one time" {
     const raw_conninfo = std.c.getenv("ZIGCHO_TEST_POSTGRES_STORE_URL") orelse return error.SkipZigTest;
     var store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));

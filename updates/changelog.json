@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 58,
+      "version": "2026.906.2",
+      "display_version": "the mirror can move on",
+      "created_at": "2026-09-06T12:00:00Z",
+      "updates": [
+        {
+          "name": "2026-09-06-mirror-queue.md",
+          "created_at": "2026-09-06T12:00:00Z",
+          "commit": "",
+          "sha256": "d1372548fff434ecc0ec3638927d2ebb728b2791a0c4c94acc27c0a450084e5c"
+        }
+      ]
+    },
+    {
       "id": 57,
       "version": "2026.906.1",
       "display_version": "server stats and the stable map",

@@ -48,7 +48,7 @@ pub fn beatmapSetIdsMissingArchives(self: *Store, allocator: std.mem.Allocator, 
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
     var stmt: ?*c.sqlite3_stmt = null;
-    const sql = "SELECT b.set_id FROM beatmaps b LEFT JOIN beatmap_archives a ON a.set_id=b.set_id WHERE b.set_id>0 AND a.set_id IS NULL GROUP BY b.set_id ORDER BY max(b.last_update) DESC,b.set_id DESC LIMIT ?1";
+    const sql = "SELECT b.set_id FROM beatmaps b LEFT JOIN beatmap_archives a ON a.set_id=b.set_id WHERE b.set_id>0 AND a.set_id IS NULL AND b.set_id NOT IN(SELECT set_id FROM beatmap_hydration_failures WHERE next_retry_at>unixepoch()) GROUP BY b.set_id ORDER BY max(b.last_update) DESC,b.set_id DESC LIMIT ?1";
     if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(stmt);
     _ = c.sqlite3_bind_int(stmt, 1, limit);
@@ -60,6 +60,23 @@ pub fn beatmapSetIdsMissingArchives(self: *Store, allocator: std.mem.Allocator, 
         else => return error.DatabaseQueryFailed,
     };
     return ids.toOwnedSlice(allocator);
+}
+
+pub fn recordMirrorFailure(self: *Store, set_id: i32, reason: []const u8, now: i64) !void {
+    var md5: [32]u8 = undefined;
+    {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+        var stmt: ?*c.sqlite3_stmt = null;
+        if (c.sqlite3_prepare_v2(self.db, "SELECT md5 FROM beatmaps WHERE set_id=?1 ORDER BY id LIMIT 1", -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+        defer _ = c.sqlite3_finalize(stmt);
+        _ = c.sqlite3_bind_int(stmt, 1, set_id);
+        if (c.sqlite3_step(stmt) != c.SQLITE_ROW) return error.UnknownBeatmapSet;
+        const text = c.sqlite3_column_text(stmt, 0) orelse return error.UnknownBeatmapSet;
+        if (c.sqlite3_column_bytes(stmt, 0) != md5.len) return error.UnknownBeatmapSet;
+        @memcpy(&md5, text[0..md5.len]);
+    }
+    try self.recordHydrationFailure(&md5, set_id, reason, now);
 }
 
 pub fn beatmapArchiveIdsMissingSize(self: *Store, allocator: std.mem.Allocator, limit: u16) ![]i32 {

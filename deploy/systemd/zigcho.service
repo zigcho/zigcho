@@ -1,7 +1,7 @@
 [Unit]
 Description=zigcho osu server
 After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+Wants=network-online.target postgresql.service zigcho-mirror-worker.service
 
 [Service]
 Type=simple

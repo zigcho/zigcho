@@ -11,6 +11,12 @@ pub const Storage = struct {
     access_key_id: []const u8,
     secret_access_key: []const u8,
     region: []const u8 = "auto",
+    proxy_port: u16 = 0,
+
+    fn localProxy(self: Storage) ?std.http.Client.Proxy {
+        if (self.proxy_port == 0) return null;
+        return .{ .protocol = .plain, .host = .{ .bytes = "127.0.0.1" }, .port = self.proxy_port, .authorization = null, .supports_connect = true };
+    }
 
     pub const ObjectMetadata = struct {
         bytes: usize,
@@ -181,6 +187,8 @@ pub const Storage = struct {
         };
         var client: std.http.Client = .{ .allocator = allocator, .io = io };
         defer client.deinit();
+        var proxy = self.localProxy();
+        if (proxy) |*configured| client.https_proxy = configured;
         if (range) |r| {
             var req = try client.request(.GET, try std.Uri.parse(url), .{
                 .redirect_behavior = .unhandled,
@@ -375,6 +383,18 @@ fn validObjectKey(value: []const u8) bool {
     if (value.len == 0 or value.len > 200 or value[0] == '/' or std.mem.indexOf(u8, value, "..") != null) return false;
     for (value) |char| if (!std.ascii.isAlphanumeric(char) and char != '/' and char != '-' and char != '_' and char != '.') return false;
     return true;
+}
+
+test "mirror storage proxy stays loopback only and leaves direct storage unchanged" {
+    var storage: Storage = .{ .endpoint = "https://sin1.contabostorage.com", .bucket = "data", .access_key_id = "key", .secret_access_key = "secret" };
+    try std.testing.expect(storage.localProxy() == null);
+    storage.proxy_port = 40000;
+    const proxy = storage.localProxy().?;
+    try std.testing.expectEqualStrings("127.0.0.1", proxy.host.bytes);
+    try std.testing.expectEqual(@as(u16, 40000), proxy.port);
+    try std.testing.expect(proxy.supports_connect);
+    try std.testing.expect(proxy.authorization == null);
+    try std.testing.expectEqualStrings("https://sin1.contabostorage.com", storage.endpoint);
 }
 
 test "r2 timestamp and configuration stay deterministic" {
