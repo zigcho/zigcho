@@ -2220,6 +2220,8 @@ test "private profile stats never enter website or lazer rankings" {
 }
 
 test "website profile plays keep an accessible score details dialog" {
+    try std.testing.expect(std.mem.indexOf(u8, server_fallback_source, "script-src 'self' 'unsafe-inline'") != null);
+    try std.testing.expect(std.mem.indexOf(u8, server_fallback_source, "style-src 'self' 'unsafe-inline'") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "const emptyImage='data:image/gif") != null);
     try std.testing.expect(std.mem.indexOf(u8, server_fallback_source, "img-src 'self' data: https://a.kai.ovh") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, ".accent-bot #pinned-plays") != null);

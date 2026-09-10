@@ -119,7 +119,7 @@ pub fn handle(self: anytype, req: *std.http.Server.Request, ctx: *const Context)
         }
         const headers = [_]std.http.Header{
             .{ .name = "cache-control", .value = "no-cache" },
-            .{ .name = "content-security-policy", .value = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: https://a.kai.ovh https://assets.kai.ovh https://assets.ppy.sh; media-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" },
+            .{ .name = "content-security-policy", .value = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://a.kai.ovh https://assets.kai.ovh https://assets.ppy.sh; media-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'" },
             .{ .name = "x-content-type-options", .value = "nosniff" },
         };
         try respond(req, if (known_website_page) .ok else .not_found, "text/html; charset=utf-8", index_page, &headers);

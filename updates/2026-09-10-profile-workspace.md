@@ -15,3 +15,5 @@ staff controls are on profiles now: notes, kicks, silences, restrictions, sessio
 no pp changes in this build. the custom boost is still relax only.
 
 the release check also stopped timing out on an old history query we no longer use. it still runs the current query and checks every resulting row against an independent expected result.
+
+fixed the page security policy blocking its own profile scripts and styles. that was making a working API look like a 503 on the website.
