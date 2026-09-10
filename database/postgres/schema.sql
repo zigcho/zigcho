@@ -30,6 +30,7 @@ CREATE TABLE users (
     profile_source text NOT NULL DEFAULT 'all' CHECK (profile_source IN ('all', 'lazer', 'scorev2')),
     profile_title text NOT NULL DEFAULT '' CHECK (length(profile_title) <= 40),
     profile_pronouns text NOT NULL DEFAULT '' CHECK (length(profile_pronouns) <= 32),
+    profile_setup text NOT NULL DEFAULT '' CHECK (length(profile_setup) <= 160),
     profile_location text NOT NULL DEFAULT '' CHECK (length(profile_location) <= 60),
     profile_website text NOT NULL DEFAULT '' CHECK (length(profile_website) <= 200),
     profile_accent text NOT NULL DEFAULT 'pink' CHECK (profile_accent IN ('pink', 'violet', 'blue', 'mint', 'gold', 'red')),
@@ -805,4 +806,4 @@ VALUES('#osu','general chat',1),('#announce','updates',8192),('#lobby','multipla
 INSERT INTO server_controls(key)
 VALUES('registrations'),('stable_login'),('lazer_login'),('stable_scores'),('lazer_scores'),('lazer_multiplayer'),('spectator'),('bss'),('beatmap_downloads'),('website_writes');
 
-INSERT INTO schema_migrations(version) VALUES (48);
+INSERT INTO schema_migrations(version) VALUES (49);

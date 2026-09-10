@@ -286,6 +286,7 @@ pub fn migrate(self: anytype) !void {
     if (version <= 45) try postgres.exec(lease.conn, database_sql.postgresMigration(46));
     if (version <= 46) try postgres.exec(lease.conn, database_sql.postgresMigration(47));
     if (version <= 47) try postgres.exec(lease.conn, database_sql.postgresMigration(48));
+    if (version <= 48) try postgres.exec(lease.conn, database_sql.postgresMigration(49));
     try pg_score_maintenance.backfillLazerClassicScoresWithConnection(self, lease.conn);
     try finishPendingRankedStatsRebuild(self, lease.conn);
     try postgres.exec(lease.conn, "DELETE FROM zigcho.user_stats_history WHERE day<((extract(epoch FROM clock_timestamp())::bigint/86400)-89)*86400");

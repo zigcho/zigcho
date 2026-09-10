@@ -74,6 +74,23 @@ if command -v flock >/dev/null 2>&1; then
   flock -n 9 || { echo "another Zigcho release operation is running" >&2; exit 1; }
 fi
 
+config=/var/lib/zigcho/config.ini
+pair_root=/opt/zigcho/release-pairs
+[ -f "$tool_release/tools/release-anticheat.sh" ] || { echo "rollback anticheat pairing tool is missing" >&2; exit 1; }
+. "$tool_release/tools/release-anticheat.sh"
+current_anticheat=$(ac_read_config)
+ac_validate_module "$current_anticheat"
+previous_anticheat=$(ac_read_pair "$previous" "$current_anticheat")
+ac_validate_module "$previous_anticheat"
+if [ -n "$previous_anticheat" ]; then
+  runuser --user zigcho -- "$previous/zigcho-anticheat-host-smoke" "$previous_anticheat"
+fi
+if [ -n "$current_anticheat" ]; then
+  runuser --user zigcho -- "$current_release/zigcho-anticheat-host-smoke" "$current_anticheat"
+fi
+ac_record_pair "$current_release" "$current_anticheat"
+ac_record_pair "$previous" "$previous_anticheat"
+
 install -d -m 0700 -o postgres -g postgres "$backup_dir"
 rollback_backup="$backup_dir/zigcho-rollback-$(date -u +%Y%m%dT%H%M%SZ)-$$.dump"
 case "$rollback_backup" in
@@ -146,6 +163,7 @@ restore_current() {
       --dbname=zigcho \
       "$forward_backup"
     ln -sfn "$current_release" "$current"
+    ac_set_config "$current_anticheat"
     systemctl start "$service"
     curl --fail --silent --show-error --retry 10 --retry-delay 1 --retry-connrefused "$health_url" >/dev/null
   fi
@@ -156,6 +174,7 @@ trap restore_current EXIT HUP INT TERM
 
 systemctl stop "$service"
 service_stopped=yes
+ac_set_config "$previous_anticheat"
 runuser --user postgres -- dropdb --if-exists --force zigcho
 runuser --user postgres -- createdb --owner=zigcho zigcho
 runuser --user postgres -- pg_restore \

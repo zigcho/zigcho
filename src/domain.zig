@@ -2,8 +2,10 @@ const std = @import("std");
 
 pub const Mode = enum(u8) { osu, taiko, @"catch", mania };
 pub const SiteScoreSource = enum { all, stable, lazer, scorev2 };
+pub const validProfileSetup = @import("profile_setup.zig").valid;
 pub const ProfileAccent = enum { pink, violet, blue, mint, gold, red };
 pub const SiteProfileSettings = struct {
+    setup: ?[]const u8 = null,
     bio: []const u8,
     title: []const u8,
     pronouns: []const u8,

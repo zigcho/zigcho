@@ -248,6 +248,7 @@ pub fn customAvatarUserIds(self: anytype, allocator: std.mem.Allocator) ![]i32 {
 }
 
 pub fn updateSiteProfile(self: anytype, user_id: i32, settings: domain.SiteProfileSettings) !void {
+    if (settings.setup) |setup| if (!domain.validProfileSetup(setup)) return error.InvalidProfileSetup;
     var id_buf: [24]u8 = undefined;
     var mode_buf: [4]u8 = undefined;
     var avatar_buf: [4]u8 = undefined;
@@ -256,7 +257,7 @@ pub fn updateSiteProfile(self: anytype, user_id: i32, settings: domain.SiteProfi
     const avatar = try std.fmt.bufPrint(&avatar_buf, "{d}", .{settings.avatar_key});
     var lease = self.pool.acquire();
     defer lease.release();
-    var result = try postgres.queryParams(self.allocator, lease.conn, "UPDATE zigcho.users SET bio=$1,profile_title=$2,profile_pronouns=$3,profile_location=$4,profile_website=$5,profile_accent=$6,preferred_mode=$7,profile_source=$8,avatar_key=$9,show_country=$10,show_profile_stats=$11,show_recent_scores=$12 WHERE id=$13 AND id!=3 RETURNING id", &.{ settings.bio, settings.title, settings.pronouns, settings.location, settings.website, @tagName(settings.accent), mode, @tagName(settings.profile_source), avatar, if (settings.show_country) "true" else "false", if (settings.show_profile_stats) "true" else "false", if (settings.show_recent_scores) "true" else "false", id });
+    var result = try postgres.queryParams(self.allocator, lease.conn, "UPDATE zigcho.users SET bio=$1,profile_title=$2,profile_pronouns=$3,profile_location=$4,profile_website=$5,profile_accent=$6,preferred_mode=$7,profile_source=$8,avatar_key=$9,show_country=$10,show_profile_stats=$11,show_recent_scores=$12,profile_setup=coalesce($14,profile_setup) WHERE id=$13 AND id!=3 RETURNING id", &.{ settings.bio, settings.title, settings.pronouns, settings.location, settings.website, @tagName(settings.accent), mode, @tagName(settings.profile_source), avatar, if (settings.show_country) "true" else "false", if (settings.show_profile_stats) "true" else "false", if (settings.show_recent_scores) "true" else "false", id, settings.setup });
     defer result.deinit();
     if (result.rows() != 1) return error.UserNotFound;
 }
@@ -374,7 +375,7 @@ pub fn siteAccountJson(self: anytype, allocator: std.mem.Allocator, user_id: i32
     const id = try std.fmt.bufPrint(&id_buf, "{d}", .{user_id});
     var lease = self.pool.acquire();
     defer lease.release();
-    var result = try postgres.queryParams(allocator, lease.conn, "SELECT u.id,u.name,u.email,u.country,u.privileges,u.bio,u.preferred_mode,u.profile_source,u.avatar_key,EXISTS(SELECT 1 FROM zigcho.user_avatars a WHERE a.user_id=u.id),coalesce((SELECT updated_at FROM zigcho.user_avatars a WHERE a.user_id=u.id),0),u.created_at,coalesce(u.last_login,0),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_country,u.show_profile_stats,u.show_recent_scores,u.username_changes,EXISTS(SELECT 1 FROM zigcho.user_banners b WHERE b.user_id=u.id),coalesce((SELECT updated_at FROM zigcho.user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,(t.leader_id=u.id) FROM zigcho.users u LEFT JOIN zigcho.team_members tm ON tm.user_id=u.id LEFT JOIN zigcho.teams t ON t.id=tm.team_id WHERE u.id=$1 AND u.id!=3", &.{id});
+    var result = try postgres.queryParams(allocator, lease.conn, "SELECT u.id,u.name,u.email,u.country,u.privileges,u.bio,u.preferred_mode,u.profile_source,u.avatar_key,EXISTS(SELECT 1 FROM zigcho.user_avatars a WHERE a.user_id=u.id),coalesce((SELECT updated_at FROM zigcho.user_avatars a WHERE a.user_id=u.id),0),u.created_at,coalesce(u.last_login,0),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_country,u.show_profile_stats,u.show_recent_scores,u.username_changes,EXISTS(SELECT 1 FROM zigcho.user_banners b WHERE b.user_id=u.id),coalesce((SELECT updated_at FROM zigcho.user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,(t.leader_id=u.id),u.profile_setup FROM zigcho.users u LEFT JOIN zigcho.team_members tm ON tm.user_id=u.id LEFT JOIN zigcho.teams t ON t.id=tm.team_id WHERE u.id=$1 AND u.id!=3", &.{id});
     defer result.deinit();
     if (result.rows() == 0) return null;
     var output: std.Io.Writer.Allocating = .init(allocator);
@@ -399,6 +400,8 @@ pub fn siteAccountJson(self: anytype, allocator: std.mem.Allocator, user_id: i32
     try common.jsonString(&output.writer, result.value(0, 16));
     try output.writer.writeAll(",\"profile_accent\":");
     try common.jsonString(&output.writer, result.value(0, 17));
+    try output.writer.writeAll(",\"profile_setup\":");
+    try common.jsonString(&output.writer, result.value(0, 28));
     const changes = try result.int(i32, 0, 21);
     const privileges = try result.int(u32, 0, 4);
     try output.writer.print(",\"show_country\":{},\"show_profile_stats\":{},\"show_recent_scores\":{},\"username_changes\":{d},\"username_change_free\":{},\"username_change_allowed\":{},\"has_custom_banner\":{},\"banner_version\":{d},\"team\":", .{ try result.boolean(0, 18), try result.boolean(0, 19), try result.boolean(0, 20), changes, changes == 0, changes == 0 or (privileges & (1 << 5)) != 0, try result.boolean(0, 22), try result.int(i64, 0, 23) });

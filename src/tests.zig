@@ -2015,6 +2015,7 @@ test "website profile settings and private avatar metadata stay account scoped" 
 
     try store.updateSiteProfile(user_id, .{
         .bio = "hello <kai> & friends",
+        .setup = "desktop,tablet,keyboard,pure-luck",
         .title = "tiny mapper",
         .pronouns = "she/her",
         .location = "somewhere quiet",
@@ -2037,6 +2038,7 @@ test "website profile settings and private avatar metadata stay account scoped" 
     try std.testing.expectEqual(@as(i64, 2), account.value.object.get("avatar_key").?.integer);
     try std.testing.expectEqualStrings("tiny mapper", account.value.object.get("profile_title").?.string);
     try std.testing.expectEqualStrings("violet", account.value.object.get("profile_accent").?.string);
+    try std.testing.expectEqualStrings("desktop,tablet,keyboard,pure-luck", account.value.object.get("profile_setup").?.string);
     try std.testing.expect(!account.value.object.get("show_country").?.bool);
     try std.testing.expect(!account.value.object.get("has_custom_avatar").?.bool);
     const default_summary = (try store.lazerProfileSummary(user_id)).?;
@@ -2270,7 +2272,8 @@ test "website profile plays keep an accessible score details dialog" {
     try std.testing.expect(std.mem.indexOf(u8, index_page, "if(mapped)recent.after(mapped)") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "achievementAnchor=mapped||recent") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "achievementAnchor.insertAdjacentHTML('afterend'") != null);
-    try std.testing.expect(std.mem.indexOf(u8, index_page, "online · '+esc(presence.client_label)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_page, "presence-client") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_page, "esc(presence.client_label)") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "beatmaps.kai.ovh") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "stored sets") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "'irc.kai.ovh':['shared IRC','TLS IRC access to the same Stable, lazer and website chat history.','6697/tls','reserved']") != null);

@@ -40,6 +40,8 @@ on:
       - tools/hotfix.py
       - tools/restore-postgres-drill.sh
       - tools/rollback-release.sh
+      - tools/release-anticheat.sh
+      - tools/test-release-anticheat.sh
       - hotfixes/**
       - deploy/Dockerfile.hotfix
       - build.zig
@@ -115,6 +117,9 @@ jobs:
 
       - name: verify the dynamic changelog feed
         run: python3 tools/changelog-manifest.py --check
+
+      - name: verify paired anticheat rollback
+        run: sh tools/test-release-anticheat.sh
 
       - name: compare cold history update plans before compiling
         env:
@@ -300,7 +305,7 @@ jobs:
             docker run --rm --network host \
               -e "ZIGCHO_TEST_POSTGRES_PROFILE_PAGES_URL=host=127.0.0.1 port=5432 dbname=$database_name user=zigcho password=zigcho-gate connect_timeout=5" \
               "zigcho-release-gate:${GITHUB_SHA}" \
-              zig build test "-Doptimize=$optimization" -Dtest-filter="profile score pages" -Dtest-filter="website profile plays keep" -Dtest-filter="restricted profile access" -Dtest-filter="staff authorization"
+              zig build test "-Doptimize=$optimization" -Dtest-filter="profile score pages" -Dtest-filter="profile setup" -Dtest-filter="website profile" -Dtest-filter="restricted profile access" -Dtest-filter="staff authorization"
           done
 
       - name: run focused correction tests
@@ -471,7 +476,7 @@ jobs:
         run: |
           set -euo pipefail
           artifacts/server/zigcho check
-          test "$(psql -h 127.0.0.1 -U zigcho -d zigcho -Atc 'select max(version) from zigcho.schema_migrations')" = 48
+          test "$(psql -h 127.0.0.1 -U zigcho -d zigcho -Atc 'select max(version) from zigcho.schema_migrations')" = 49
           test "$(psql -h 127.0.0.1 -U zigcho -d zigcho -Atc 'select min(next_id) >= 1000000000 from zigcho.bss_counters')" = t
           artifacts/server/zigcho 127.0.0.1 18099 >artifacts/server-smoke.log 2>&1 &
           server_pid=$!

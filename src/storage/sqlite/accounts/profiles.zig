@@ -11,10 +11,11 @@ const paging = @import("../../../profile_paging.zig");
 const jsonString = @import("../beatmaps/lazer_listing.zig").jsonString;
 
 pub fn updateSiteProfile(self: *Store, user_id: i32, settings: domain.SiteProfileSettings) !void {
+    if (settings.setup) |setup| if (!domain.validProfileSetup(setup)) return error.InvalidProfileSetup;
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
     var stmt: ?*c.sqlite3_stmt = null;
-    if (c.sqlite3_prepare_v2(self.db, "UPDATE users SET bio=?1,profile_title=?2,profile_pronouns=?3,profile_location=?4,profile_website=?5,profile_accent=?6,preferred_mode=?7,profile_source=?8,avatar_key=?9,show_country=?10,show_profile_stats=?11,show_recent_scores=?12 WHERE id=?13 AND id!=3", -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    if (c.sqlite3_prepare_v2(self.db, "UPDATE users SET bio=?1,profile_title=?2,profile_pronouns=?3,profile_location=?4,profile_website=?5,profile_accent=?6,preferred_mode=?7,profile_source=?8,avatar_key=?9,show_country=?10,show_profile_stats=?11,show_recent_scores=?12,profile_setup=coalesce(?14,profile_setup) WHERE id=?13 AND id!=3", -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(stmt);
     _ = c.sqlite3_bind_text(stmt, 1, settings.bio.ptr, @intCast(settings.bio.len), null);
     _ = c.sqlite3_bind_text(stmt, 2, settings.title.ptr, @intCast(settings.title.len), null);
@@ -31,6 +32,7 @@ pub fn updateSiteProfile(self: *Store, user_id: i32, settings: domain.SiteProfil
     _ = c.sqlite3_bind_int(stmt, 11, @intFromBool(settings.show_profile_stats));
     _ = c.sqlite3_bind_int(stmt, 12, @intFromBool(settings.show_recent_scores));
     _ = c.sqlite3_bind_int(stmt, 13, user_id);
+    if (settings.setup) |setup| _ = c.sqlite3_bind_text(stmt, 14, setup.ptr, @intCast(setup.len), null);
     if (c.sqlite3_step(stmt) != c.SQLITE_DONE or c.sqlite3_changes(self.db) != 1) return error.UserNotFound;
 }
 
@@ -150,7 +152,7 @@ pub fn siteAccountJson(self: *Store, allocator: std.mem.Allocator, user_id: i32)
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
     var stmt: ?*c.sqlite3_stmt = null;
-    const sql = "SELECT u.id,u.name,u.email,u.country,u.privileges,u.bio,u.preferred_mode,u.profile_source,u.avatar_key,EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=u.id),coalesce((SELECT updated_at FROM user_avatars a WHERE a.user_id=u.id),0),u.created_at,coalesce(u.last_login,0),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_country,u.show_profile_stats,u.show_recent_scores,u.username_changes,EXISTS(SELECT 1 FROM user_banners b WHERE b.user_id=u.id),coalesce((SELECT updated_at FROM user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,CASE WHEN t.leader_id=u.id THEN 1 ELSE 0 END FROM users u LEFT JOIN team_members tm ON tm.user_id=u.id LEFT JOIN teams t ON t.id=tm.team_id WHERE u.id=?1 AND u.id!=3";
+    const sql = "SELECT u.id,u.name,u.email,u.country,u.privileges,u.bio,u.preferred_mode,u.profile_source,u.avatar_key,EXISTS(SELECT 1 FROM user_avatars a WHERE a.user_id=u.id),coalesce((SELECT updated_at FROM user_avatars a WHERE a.user_id=u.id),0),u.created_at,coalesce(u.last_login,0),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_country,u.show_profile_stats,u.show_recent_scores,u.username_changes,EXISTS(SELECT 1 FROM user_banners b WHERE b.user_id=u.id),coalesce((SELECT updated_at FROM user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,CASE WHEN t.leader_id=u.id THEN 1 ELSE 0 END,u.profile_setup FROM users u LEFT JOIN team_members tm ON tm.user_id=u.id LEFT JOIN teams t ON t.id=tm.team_id WHERE u.id=?1 AND u.id!=3";
     if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(stmt);
     _ = c.sqlite3_bind_int(stmt, 1, user_id);
@@ -177,6 +179,8 @@ pub fn siteAccountJson(self: *Store, allocator: std.mem.Allocator, user_id: i32)
     try jsonString(&output.writer, std.mem.span(c.sqlite3_column_text(stmt, 16)));
     try output.writer.writeAll(",\"profile_accent\":");
     try jsonString(&output.writer, std.mem.span(c.sqlite3_column_text(stmt, 17)));
+    try output.writer.writeAll(",\"profile_setup\":");
+    try jsonString(&output.writer, std.mem.span(c.sqlite3_column_text(stmt, 28)));
     const changes = c.sqlite3_column_int(stmt, 21);
     try output.writer.print(",\"show_country\":{},\"show_profile_stats\":{},\"show_recent_scores\":{},\"username_changes\":{d},\"username_change_free\":{},\"username_change_allowed\":{},\"has_custom_banner\":{},\"banner_version\":{d},\"team\":", .{ c.sqlite3_column_int(stmt, 18) != 0, c.sqlite3_column_int(stmt, 19) != 0, c.sqlite3_column_int(stmt, 20) != 0, changes, changes == 0, changes == 0 or (c.sqlite3_column_int64(stmt, 4) & (1 << 5)) != 0, c.sqlite3_column_int(stmt, 22) != 0, c.sqlite3_column_int64(stmt, 23) });
     if (c.sqlite3_column_type(stmt, 24) == c.SQLITE_NULL) {
@@ -262,7 +266,7 @@ pub fn siteProfilePageForViewer(self: *Store, allocator: std.mem.Allocator, user
     const score_mode = domain.siteScoreMode(stats_mode);
     const namespace = domain.siteNamespace(source, stats_mode);
     var user: ?*c.sqlite3_stmt = null;
-    const user_sql = "SELECT u.id,u.name,CASE WHEN ?2=1 OR u.show_country=1 THEN u.country ELSE 'XX' END,u.privileges,u.created_at,u.bio,u.preferred_mode,u.profile_source,coalesce((SELECT updated_at FROM user_avatars a WHERE a.user_id=u.id),u.avatar_key),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_profile_stats,u.show_recent_scores,coalesce((SELECT updated_at FROM user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,coalesce((SELECT updated_at FROM team_assets a WHERE a.team_id=t.id AND a.kind='flag'),0)," ++ visible_follower_count_sql ++ ",u.restricted FROM users u LEFT JOIN team_members tm ON tm.user_id=u.id LEFT JOIN teams t ON t.id=tm.team_id WHERE u.id=?1 AND u.id!=3 AND (u.restricted=0 OR ?2=1)";
+    const user_sql = "SELECT u.id,u.name,CASE WHEN ?2=1 OR u.show_country=1 THEN u.country ELSE 'XX' END,u.privileges,u.created_at,u.bio,u.preferred_mode,u.profile_source,coalesce((SELECT updated_at FROM user_avatars a WHERE a.user_id=u.id),u.avatar_key),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_profile_stats,u.show_recent_scores,coalesce((SELECT updated_at FROM user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,coalesce((SELECT updated_at FROM team_assets a WHERE a.team_id=t.id AND a.kind='flag'),0)," ++ visible_follower_count_sql ++ ",u.restricted,u.profile_setup FROM users u LEFT JOIN team_members tm ON tm.user_id=u.id LEFT JOIN teams t ON t.id=tm.team_id WHERE u.id=?1 AND u.id!=3 AND (u.restricted=0 OR ?2=1)";
     if (c.sqlite3_prepare_v2(self.db, user_sql, -1, &user, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(user);
     _ = c.sqlite3_bind_int(user, 1, user_id);
@@ -366,6 +370,8 @@ pub fn siteProfilePageForViewer(self: *Store, allocator: std.mem.Allocator, user
     try jsonString(&output.writer, std.mem.span(c.sqlite3_column_text(user, 12)));
     try output.writer.writeAll(",\"profile_accent\":");
     try jsonString(&output.writer, std.mem.span(c.sqlite3_column_text(user, 13)));
+    try output.writer.writeAll(",\"profile_setup\":");
+    try jsonString(&output.writer, std.mem.span(c.sqlite3_column_text(user, 23)));
     const banner_version = c.sqlite3_column_int64(user, 16);
     try output.writer.writeAll(",\"banner_url\":");
     if (banner_version > 0) try output.writer.print("\"https://assets.kai.ovh/banners/{d}/cover.jpg?v={d}\"", .{ user_id, banner_version }) else try output.writer.writeAll("null");

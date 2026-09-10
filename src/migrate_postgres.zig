@@ -21,14 +21,15 @@ const Table = struct {
 };
 
 const users = [_]Column{
-    .{ .name = "id", .kind = .integer },            .{ .name = "name", .kind = .text },                  .{ .name = "safe_name", .kind = .text },
-    .{ .name = "password_hash", .kind = .blob },    .{ .name = "password_salt", .kind = .blob },         .{ .name = "email", .kind = .text },
-    .{ .name = "country", .kind = .text },          .{ .name = "privileges", .kind = .integer },         .{ .name = "silence_end", .kind = .integer },
-    .{ .name = "restricted", .kind = .boolean },    .{ .name = "created_at", .kind = .integer },         .{ .name = "last_login", .kind = .integer },
-    .{ .name = "avatar_key", .kind = .integer },    .{ .name = "bio", .kind = .text },                   .{ .name = "preferred_mode", .kind = .integer },
-    .{ .name = "profile_source", .kind = .text },   .{ .name = "profile_title", .kind = .text },         .{ .name = "profile_pronouns", .kind = .text },
-    .{ .name = "profile_location", .kind = .text }, .{ .name = "profile_website", .kind = .text },       .{ .name = "profile_accent", .kind = .text },
-    .{ .name = "show_country", .kind = .boolean },  .{ .name = "show_profile_stats", .kind = .boolean }, .{ .name = "show_recent_scores", .kind = .boolean },
+    .{ .name = "id", .kind = .integer },                 .{ .name = "name", .kind = .text },             .{ .name = "safe_name", .kind = .text },
+    .{ .name = "password_hash", .kind = .blob },         .{ .name = "password_salt", .kind = .blob },    .{ .name = "email", .kind = .text },
+    .{ .name = "country", .kind = .text },               .{ .name = "privileges", .kind = .integer },    .{ .name = "silence_end", .kind = .integer },
+    .{ .name = "restricted", .kind = .boolean },         .{ .name = "created_at", .kind = .integer },    .{ .name = "last_login", .kind = .integer },
+    .{ .name = "avatar_key", .kind = .integer },         .{ .name = "bio", .kind = .text },              .{ .name = "preferred_mode", .kind = .integer },
+    .{ .name = "profile_setup", .kind = .text },         .{ .name = "profile_source", .kind = .text },   .{ .name = "profile_title", .kind = .text },
+    .{ .name = "profile_pronouns", .kind = .text },      .{ .name = "profile_location", .kind = .text }, .{ .name = "profile_website", .kind = .text },
+    .{ .name = "profile_accent", .kind = .text },        .{ .name = "show_country", .kind = .boolean },  .{ .name = "show_profile_stats", .kind = .boolean },
+    .{ .name = "show_recent_scores", .kind = .boolean },
 };
 const stats = [_]Column{
     .{ .name = "user_id", .kind = .integer },     .{ .name = "mode", .kind = .integer },  .{ .name = "ranked_score", .kind = .integer },

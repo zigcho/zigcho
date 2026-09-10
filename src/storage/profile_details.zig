@@ -87,6 +87,22 @@ pub const Filter = struct {
     }
 };
 
+pub fn scoreJudgements(store: anytype, allocator: std.mem.Allocator, user_id: i32, score_id: i64, lazer: bool, recent_visible: bool, stats_visible: bool) !?[]u8 {
+    var user_buffer: [24]u8 = undefined;
+    var score_buffer: [24]u8 = undefined;
+    const params = [_][]const u8{ try std.fmt.bufPrint(&user_buffer, "{d}", .{user_id}), try std.fmt.bufPrint(&score_buffer, "{d}", .{score_id}), if (recent_visible) "1" else "0", if (stats_visible) "1" else "0" };
+    const visible = " WHERE user_id=$1 AND id=$2 AND ($3='1' OR ($4='1' AND passed AND best))";
+    var rows = if (lazer)
+        try query(store, allocator, "SELECT ruleset_id,statistics_json FROM zigcho.lazer_scores" ++ visible, &params)
+    else
+        try query(store, allocator, "SELECT mode,n300,n100,n50,nmiss,ngeki,nkatu FROM zigcho.scores" ++ visible, &params);
+    defer rows.deinit();
+    if (rows.items.len == 0) return null;
+    const row = rows.items[0];
+    if (lazer) return try std.fmt.allocPrint(allocator, "{{\"mode\":{s},\"statistics\":{s}}}", .{ row[0], row[1] });
+    return try std.fmt.allocPrint(allocator, "{{\"mode\":{s},\"statistics\":{{\"n300\":{s},\"n100\":{s},\"n50\":{s},\"nmiss\":{s},\"ngeki\":{s},\"nkatu\":{s}}}}}", .{ row[0], row[1], row[2], row[3], row[4], row[5], row[6] });
+}
+
 pub fn metrics(store: anytype, allocator: std.mem.Allocator, user_id: i32, filter: Filter) ![]u8 {
     var buffers: [2][24]u8 = undefined;
     const params = try filter.params(user_id, &buffers);

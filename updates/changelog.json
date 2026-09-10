@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 63,
+      "version": "2026.910.4",
+      "display_version": "the website needed this",
+      "created_at": "2026-09-10T12:54:25Z",
+      "updates": [
+        {
+          "name": "2026-09-10-website-and-anticheat.md",
+          "created_at": "2026-09-10T12:54:25Z",
+          "commit": "",
+          "sha256": "7ed81adc0087a6fe1b6edc09eaf5e1b696ef5b2e9a0ed8260a392e6604b5d431"
+        }
+      ]
+    },
+    {
       "id": 62,
       "version": "2026.910.3",
       "display_version": "profiles have the rest of the account now",

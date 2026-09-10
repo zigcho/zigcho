@@ -120,6 +120,8 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
     const origin_owned = ctx.origin_owned;
     const body = ctx.body;
     if (try @import("profile.zig").handle(self, req, ctx)) return;
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/design.js")) return respond(req, .ok, "text/javascript; charset=utf-8", @embedFile("../../web/design.js"), &.{.{ .name = "cache-control", .value = "no-cache" }});
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/design.css")) return respond(req, .ok, "text/css; charset=utf-8", @embedFile("../../web/design.css"), &.{.{ .name = "cache-control", .value = "no-cache" }});
     if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/profile.js")) return respond(req, .ok, "text/javascript; charset=utf-8", @embedFile("../../web/profile.js"), &.{.{ .name = "cache-control", .value = "no-cache" }});
     if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/profile.css")) return respond(req, .ok, "text/css; charset=utf-8", @embedFile("../../web/profile.css"), &.{.{ .name = "cache-control", .value = "no-cache" }});
     if (std.mem.eql(u8, path, "/api/v1/appeals")) {
@@ -447,6 +449,9 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             }
             if (req.head.method == .POST) {
                 if (!web_auth.sameOrigin(origin_owned, host_owned) or !web_auth.csrfMatches(token, csrf_owned)) return respond(req, .forbidden, "application/json", "{\"error\":\"invalid request\"}", &no_store);
+                const setup_value = try form_urlencoded.requestField(self.allocator, body, content_type_owned, &.{"profile_setup"});
+                defer if (setup_value) |value| self.allocator.free(value);
+                if (setup_value) |value| if (!domain.validProfileSetup(value)) return respond(req, .bad_request, "application/json", "{\"error\":\"invalid profile setup\"}", &no_store);
                 const bio_value = (try form_urlencoded.requestField(self.allocator, body, content_type_owned, &.{"bio"})) orelse return respond(req, .bad_request, "application/json", "{\"error\":\"bio required\"}", &no_store);
                 defer self.allocator.free(bio_value);
                 const title_value = (try form_urlencoded.requestField(self.allocator, body, content_type_owned, &.{"profile_title"})) orelse return respond(req, .bad_request, "application/json", "{\"error\":\"profile title required\"}", &no_store);
@@ -484,7 +489,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
                 const show_profile_stats = std.mem.eql(u8, show_stats_value, "1");
                 const show_recent_scores = std.mem.eql(u8, show_recent_value, "1");
                 if ((!show_country and !std.mem.eql(u8, show_country_value, "0")) or (!show_profile_stats and !std.mem.eql(u8, show_stats_value, "0")) or (!show_recent_scores and !std.mem.eql(u8, show_recent_value, "0")) or !validWebText(bio, 0, 500) or !validWebLine(profile_title, 40) or !validWebLine(profile_pronouns, 32) or !validWebLine(profile_location, 60) or !validProfileWebsite(profile_website) or preferred_mode > 3 or (avatar_key != 1 and avatar_key != 2)) return respond(req, .bad_request, "application/json", "{\"error\":\"invalid profile settings\"}", &no_store);
-                try self.store.updateSiteProfile(user.id, .{ .bio = bio, .title = profile_title, .pronouns = profile_pronouns, .location = profile_location, .website = profile_website, .accent = profile_accent, .preferred_mode = preferred_mode, .profile_source = profile_source, .avatar_key = avatar_key, .show_country = show_country, .show_profile_stats = show_profile_stats, .show_recent_scores = show_recent_scores });
+                try self.store.updateSiteProfile(user.id, .{ .setup = setup_value, .bio = bio, .title = profile_title, .pronouns = profile_pronouns, .location = profile_location, .website = profile_website, .accent = profile_accent, .preferred_mode = preferred_mode, .profile_source = profile_source, .avatar_key = avatar_key, .show_country = show_country, .show_profile_stats = show_profile_stats, .show_recent_scores = show_recent_scores });
                 self.lazer_multiplayer.setUserCountryVisibility(user.id, user.country, show_country);
                 bancho.setUserCountryVisibility(self.allocator, &self.store, &self.sessions, user.id, user.country, show_country);
                 const json = (try self.store.siteAccountJson(self.allocator, user.id)).?;

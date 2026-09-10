@@ -149,6 +149,7 @@ pub fn migrate(self: *Store) !void {
     if (version < 44) try self.exec(database_sql.sqliteMigration(44));
     if (version < 45) try self.exec(database_sql.sqliteMigration(45));
     if (version < 46) try self.exec(database_sql.sqliteMigration(46));
+    if (version < 47) try self.exec(database_sql.sqliteMigration(47));
     try self.backfillLazerClassicScores();
     try self.exec("DELETE FROM user_stats_history WHERE day<((unixepoch()/86400)-89)*86400");
     try self.exec(

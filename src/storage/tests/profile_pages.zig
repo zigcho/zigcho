@@ -6,6 +6,7 @@ const domain = @import("../../domain.zig");
 pub fn verify(store: anytype) !void {
     const allocator = std.testing.allocator;
     const user = try store.register("page player", "pages@example.invalid", "00000000000000000000000000000000");
+    try verifySetup(store, user);
     const map = @embedFile("../../testdata/synthetic-standard.osu");
     const base = try beatmap.parse(map);
     for (0..61) |index| {
@@ -35,8 +36,8 @@ pub fn verify(store: anytype) !void {
             .client_time = "260910000000",
             .client_flags = "0",
         };
-        _ = try store.insertStableScore(user, score, 100 + @as(f64, @floatFromInt(index)), "replay", 1_000);
-        _ = try store.insertLazerScore(user, .{
+        const stable_id = try store.insertStableScore(user, score, 100 + @as(f64, @floatFromInt(index)), "replay", 1_000);
+        const lazer_id = try store.insertLazerScore(user, .{
             .beatmap_id = metadata.id,
             .ruleset_id = 0,
             .total_score = score.total_score,
@@ -50,7 +51,20 @@ pub fn verify(store: anytype) !void {
             .namespace = .vanilla,
             .rank = "X",
         }, 101 + @as(f64, @floatFromInt(index)), "[]", "{}", "{}", "[]", "replay");
-        if (index == 0) _ = try store.setScorePinned(user, hash, 0, 0, "vanilla", true);
+        if (index == 0) {
+            _ = try store.setScorePinned(user, hash, 0, 0, "vanilla", true);
+            const detail_store = @import("../profile_details.zig");
+            for ([_]i64{ stable_id, lazer_id }, [_]bool{ false, true }) |score_id, is_lazer| {
+                const json = (try detail_store.scoreJudgements(store, allocator, user, score_id, is_lazer, true, true)).?;
+                defer allocator.free(json);
+                var parsed = try std.json.parseFromSlice(std.json.Value, allocator, json, .{});
+                defer parsed.deinit();
+                try std.testing.expectEqual(@as(i64, 0), parsed.value.object.get("mode").?.integer);
+                if (!is_lazer) try std.testing.expectEqual(@as(i64, 10), parsed.value.object.get("statistics").?.object.get("n300").?.integer);
+                try std.testing.expect((try detail_store.scoreJudgements(store, allocator, user, score_id, is_lazer, false, false)) == null);
+                try std.testing.expect((try detail_store.scoreJudgements(store, allocator, user + 999, score_id, is_lazer, true, true)) == null);
+            }
+        }
     }
     for ([_]domain.SiteScoreSource{ .all, .stable, .lazer }) |source| {
         const details = @import("../profile_details.zig");
@@ -130,4 +144,30 @@ pub fn verify(store: anytype) !void {
         try std.testing.expectEqual(@as(i64, 0), visible.value.object.get("selected_stats").?.object.get("global_rank").?.integer);
         try std.testing.expectEqual(@as(i64, 0), visible.value.object.get("first_place_count").?.integer);
     }
+}
+
+fn verifySetup(store: anytype, user: i32) !void {
+    const allocator = std.testing.allocator;
+    var settings: domain.SiteProfileSettings = .{ .setup = "desktop,tablet,keyboard,pure-luck", .bio = "", .title = "", .pronouns = "", .location = "", .website = "", .accent = .pink, .preferred_mode = 0, .profile_source = .all, .avatar_key = 1, .show_country = true, .show_profile_stats = true, .show_recent_scores = true };
+    try store.updateSiteProfile(user, settings);
+    settings.setup = null;
+    try store.updateSiteProfile(user, settings);
+    const account = (try store.siteAccountJson(allocator, user)).?;
+    defer allocator.free(account);
+    const profile = (try store.siteProfile(allocator, user, .all, 0)).?;
+    defer allocator.free(profile);
+    for ([_][]const u8{ account, profile }) |json| {
+        var parsed = try std.json.parseFromSlice(std.json.Value, allocator, json, .{});
+        defer parsed.deinit();
+        try std.testing.expectEqualStrings("desktop,tablet,keyboard,pure-luck", parsed.value.object.get("profile_setup").?.string);
+    }
+    settings.setup = "verified";
+    try std.testing.expectError(error.InvalidProfileSetup, store.updateSiteProfile(user, settings));
+    settings.setup = "";
+    try store.updateSiteProfile(user, settings);
+    const cleared = (try store.siteAccountJson(allocator, user)).?;
+    defer allocator.free(cleared);
+    var parsed = try std.json.parseFromSlice(std.json.Value, allocator, cleared, .{});
+    defer parsed.deinit();
+    try std.testing.expectEqualStrings("", parsed.value.object.get("profile_setup").?.string);
 }

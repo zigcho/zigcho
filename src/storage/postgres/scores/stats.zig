@@ -231,7 +231,7 @@ pub fn siteProfilePageForViewer(self: anytype, allocator: std.mem.Allocator, use
     const namespace = domain.siteNamespace(source, stats_mode);
     var lease = self.pool.acquire();
     defer lease.release();
-    const user_sql = "SELECT u.id,u.name,CASE WHEN $2::boolean OR u.show_country THEN u.country ELSE 'XX' END,u.privileges,u.created_at,u.bio,u.preferred_mode,u.profile_source,coalesce((SELECT updated_at FROM zigcho.user_avatars a WHERE a.user_id=u.id),u.avatar_key),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_profile_stats,u.show_recent_scores,coalesce((SELECT updated_at FROM zigcho.user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,coalesce((SELECT updated_at FROM zigcho.team_assets a WHERE a.team_id=t.id AND a.kind='flag'),0)," ++ common.visible_follower_count_sql ++ ",u.restricted FROM zigcho.users u LEFT JOIN zigcho.team_members tm ON tm.user_id=u.id LEFT JOIN zigcho.teams t ON t.id=tm.team_id WHERE u.id=$1 AND u.id!=3 AND (NOT u.restricted OR $2::boolean)";
+    const user_sql = "SELECT u.id,u.name,CASE WHEN $2::boolean OR u.show_country THEN u.country ELSE 'XX' END,u.privileges,u.created_at,u.bio,u.preferred_mode,u.profile_source,coalesce((SELECT updated_at FROM zigcho.user_avatars a WHERE a.user_id=u.id),u.avatar_key),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_profile_stats,u.show_recent_scores,coalesce((SELECT updated_at FROM zigcho.user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,coalesce((SELECT updated_at FROM zigcho.team_assets a WHERE a.team_id=t.id AND a.kind='flag'),0)," ++ common.visible_follower_count_sql ++ ",u.restricted,u.profile_setup FROM zigcho.users u LEFT JOIN zigcho.team_members tm ON tm.user_id=u.id LEFT JOIN zigcho.teams t ON t.id=tm.team_id WHERE u.id=$1 AND u.id!=3 AND (NOT u.restricted OR $2::boolean)";
     var user = try postgres.queryParams(allocator, lease.conn, user_sql, &.{ id, if (owner_view) "true" else "false" });
     defer user.deinit();
     if (user.rows() == 0) return null;
@@ -319,6 +319,8 @@ pub fn siteProfilePageForViewer(self: anytype, allocator: std.mem.Allocator, use
     try common.jsonString(&output.writer, user.value(0, 12));
     try output.writer.writeAll(",\"profile_accent\":");
     try common.jsonString(&output.writer, user.value(0, 13));
+    try output.writer.writeAll(",\"profile_setup\":");
+    try common.jsonString(&output.writer, user.value(0, 23));
     const banner_version = try user.int(i64, 0, 16);
     try output.writer.writeAll(",\"banner_url\":");
     if (banner_version > 0) try output.writer.print("\"https://assets.kai.ovh/banners/{d}/cover.jpg?v={d}\"", .{ user_id, banner_version }) else try output.writer.writeAll("null");

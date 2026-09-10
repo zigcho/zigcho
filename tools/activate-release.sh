@@ -54,18 +54,28 @@ if command -v flock >/dev/null 2>&1; then
 fi
 
 config=/var/lib/zigcho/config.ini
-anticheat_module=
-if [ -f "$config" ]; then
-  anticheat_module=$(sed -n 's/^[[:space:]]*anticheat_module_path[[:space:]]*=[[:space:]]*\([^#]*\).*$/\1/p' "$config" | tail -n 1 | sed 's/[[:space:]]*$//')
+pair_root=/opt/zigcho/release-pairs
+[ -f "$candidate/tools/release-anticheat.sh" ] || { echo "candidate anticheat pairing tool is missing" >&2; exit 1; }
+. "$candidate/tools/release-anticheat.sh"
+previous_anticheat=$(ac_read_config)
+ac_validate_module "$previous_anticheat"
+anticheat_module=$previous_anticheat
+if [ "${ZIGCHO_ANTICHEAT_MODULE+x}" = x ]; then
+  [ -n "$ZIGCHO_ANTICHEAT_MODULE" ] || { echo "empty candidate anticheat override" >&2; exit 1; }
+  anticheat_module=$ZIGCHO_ANTICHEAT_MODULE
+fi
+ac_validate_module "$anticheat_module"
+if [ "$anticheat_module" != "$previous_anticheat" ]; then
+  [ -f "$config" ] && [ ! -L "$config" ] || { echo "anticheat config is missing or symlinked" >&2; exit 1; }
 fi
 if [ -n "$anticheat_module" ]; then
-  case "$anticheat_module" in
-    /opt/zigcho/private/anticheat/*/libzigcho_anticheat.so) ;;
-    *) echo "configured anticheat module is not an immutable private release: $anticheat_module" >&2; exit 1 ;;
-  esac
-  [ -r "$anticheat_module" ] || { echo "configured anticheat module is unreadable: $anticheat_module" >&2; exit 1; }
   runuser --user zigcho -- "$candidate/zigcho-anticheat-host-smoke" "$anticheat_module"
 fi
+if [ "$anticheat_module" != "$previous_anticheat" ] && [ -n "$previous_anticheat" ]; then
+  runuser --user zigcho -- "$previous/zigcho-anticheat-host-smoke" "$previous_anticheat"
+fi
+ac_record_pair "$previous" "$previous_anticheat"
+ac_record_pair "$candidate" "$anticheat_module"
 
 restore_previous() {
   status=$?
@@ -85,6 +95,7 @@ restore_previous() {
         --dbname=zigcho \
         "$backup"
     fi
+    ac_set_config "$previous_anticheat"
     systemctl start "$service"
     curl --fail --silent --show-error --retry 10 --retry-delay 1 --retry-connrefused "$health_url" >/dev/null
     echo "release_rolled_back failed=$candidate active=$previous" >&2
@@ -121,6 +132,7 @@ printf '%s\n' "$backup_sha256" | grep -Eq '^[0-9a-f]{64}$' || { echo "invalid re
 "$candidate/tools/backup-transfer.sh" put "$backup_key" "$backup"
 systemctl stop "$service"
 service_stopped=yes
+ac_set_config "$anticheat_module"
 runuser --user zigcho -- env ZIGCHO_POSTGRES_URL="$database_url" "$candidate/zigcho" check
 recalculated=no
 if [ "$candidate_pp" != "$previous_pp" ] || [ "$current_schema" -lt 29 ]; then

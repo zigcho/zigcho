@@ -14,7 +14,7 @@ pub fn handle(self: anytype, req: *std.http.Server.Request, ctx: *const Context)
     const rest = ctx.path[prefix.len..];
     const slash = std.mem.indexOfScalar(u8, rest, '/') orelse return false;
     const kind = rest[slash + 1 ..];
-    if (!std.mem.eql(u8, kind, "details") and !std.mem.eql(u8, kind, "collection") and !std.mem.eql(u8, kind, "relationship")) return false;
+    if (!std.mem.eql(u8, kind, "details") and !std.mem.eql(u8, kind, "collection") and !std.mem.eql(u8, kind, "relationship") and !std.mem.eql(u8, kind, "score")) return false;
     if (!auth.websiteHost(ctx.host_owned)) {
         try http.respond(req, .not_found, "application/json", "{\"error\":\"not found\"}", &no_store);
         return true;
@@ -45,6 +45,21 @@ pub fn handle(self: anytype, req: *std.http.Server.Request, ctx: *const Context)
     };
     const stats_visible = access.privateView() or summary.show_profile_stats;
     const recent_visible = access.privateView() or summary.show_recent_scores;
+    if (std.mem.eql(u8, kind, "score")) {
+        const client = http.queryField(ctx.target, "client") orelse "";
+        const score_id = std.fmt.parseInt(i64, http.queryField(ctx.target, "id") orelse "0", 10) catch 0;
+        if (score_id <= 0 or (!std.mem.eql(u8, client, "stable") and !std.mem.eql(u8, client, "lazer"))) {
+            try http.respond(req, .bad_request, "application/json", "{\"error\":\"invalid score\"}", &no_store);
+            return true;
+        }
+        const json = (try details.scoreJudgements(&self.store, self.allocator, id, score_id, std.mem.eql(u8, client, "lazer"), recent_visible, stats_visible)) orelse {
+            try http.respond(req, .not_found, "application/json", "{\"error\":\"score not available\"}", &no_store);
+            return true;
+        };
+        defer self.allocator.free(json);
+        try http.respond(req, .ok, "application/json", json, &no_store);
+        return true;
+    }
     const source = std.meta.stringToEnum(domain.SiteScoreSource, http.queryField(ctx.target, "source") orelse "all");
     const mode = std.fmt.parseInt(u8, http.queryField(ctx.target, "mode") orelse "0", 10) catch 255;
     if (source == null or !domain.validSiteMode(source.?, mode)) {
