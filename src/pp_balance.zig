@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const version = "zigcho-balance-1";
+pub const version = "zigcho-relax-balance-1";
 pub const base_multiplier: f64 = 1.25;
 pub const hidden_multiplier: f64 = 1.01;
 pub const hard_rock_multiplier: f64 = 1.02;

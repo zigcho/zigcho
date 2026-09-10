@@ -6,7 +6,7 @@ pub const balance = @import("pp_balance.zig");
 // difficulty and performance formulae until a candidate is proven against real
 // scores. A policy bump therefore says what Zigcho changed without pretending
 // an upstream dependency is first-party math.
-pub const policy_version = "zigcho-pp-policy-2";
+pub const policy_version = "zigcho-pp-policy-3";
 pub const upstream_engine_version = exact.engine_version;
 
 pub const max_map_bytes: usize = 64 * 1024 * 1024;
@@ -266,7 +266,8 @@ fn calculateNormalized(map: []const u8, request: NormalizedRequest) !exact.Outpu
         else
             exact.calculate(map, request.input),
     };
-    output.pp = try balance.apply(output.pp, request.input.mods, request.rate.multiplier);
+    if (request.namespace == .relax)
+        output.pp = try balance.apply(output.pp, request.input.mods, request.rate.multiplier);
     return output;
 }
 
@@ -389,8 +390,8 @@ fn stableFixture(mods: u32) Request {
 test "pp policy exposes its owned version and stable baseline" {
     const version = try versionAlloc(std.testing.allocator);
     defer std.testing.allocator.free(version);
-    try std.testing.expect(std.mem.startsWith(u8, version, "zigcho-pp-policy-2/"));
-    try std.testing.expect(std.mem.endsWith(u8, version, "-zigcho-balance-1-rxrate"));
+    try std.testing.expect(std.mem.startsWith(u8, version, "zigcho-pp-policy-3/"));
+    try std.testing.expect(std.mem.endsWith(u8, version, "-zigcho-relax-balance-1-rxrate"));
 
     const map = @embedFile("testdata/synthetic-standard.osu");
     const comparison = try compare(std.testing.allocator, map, stableFixture(double_time | nightcore));
@@ -398,8 +399,8 @@ test "pp policy exposes its owned version and stable baseline" {
     try std.testing.expectEqual(Namespace.vanilla, comparison.namespace);
     try std.testing.expectEqual(RateMod.nightcore, comparison.rate.mod);
     try std.testing.expectApproxEqAbs(@as(f64, 1.5), comparison.rate.multiplier, 0.0000001);
-    try std.testing.expect(comparison.changed);
-    try std.testing.expectApproxEqAbs(try balance.apply(comparison.current.pp, double_time | nightcore, 1.5), comparison.candidate.pp, 0.0000001);
+    try std.testing.expect(!comparison.changed);
+    try std.testing.expectEqual(comparison.current.pp, comparison.candidate.pp);
     try std.testing.expectEqual(comparison.current.stars, comparison.candidate.stars);
 
     const normalized = try normalize(std.testing.allocator, stableFixture(nightcore));
@@ -429,11 +430,11 @@ test "pp policy keeps exact lazer rates in the comparison" {
     try std.testing.expectEqual(RateMod.double_time, comparison.rate.mod);
     try std.testing.expectApproxEqAbs(@as(f64, 1.25), comparison.rate.multiplier, 0.0000001);
     try std.testing.expectApproxEqAbs(@as(f64, 39.036597621743), comparison.current.pp, 0.0000001);
-    try std.testing.expectApproxEqAbs(try balance.apply(comparison.current.pp, double_time, 1.25), comparison.candidate.pp, 0.0000001);
-    try std.testing.expect(comparison.changed);
+    try std.testing.expectEqual(comparison.current.pp, comparison.candidate.pp);
+    try std.testing.expect(!comparison.changed);
 }
 
-test "pp policy previews and recalculation plans include assisted balance changes" {
+test "pp policy applies balance only to relax" {
     const map = @embedFile("testdata/synthetic-standard.osu");
     const requests = [_]Request{ stableFixture(relax), stableFixture(autopilot) };
     const preview_items = [_]PreviewItem{
@@ -443,10 +444,19 @@ test "pp policy previews and recalculation plans include assisted balance change
     var result = try preview(std.testing.allocator, &preview_items);
     defer result.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 2), result.items.len);
-    try std.testing.expect(result.items[0].changed and result.items[1].changed);
-    for (result.items) |item| {
-        try std.testing.expectApproxEqAbs(item.current.pp * 1.25, item.candidate.pp, 0.0000001);
-        try std.testing.expectEqual(item.current.stars, item.candidate.stars);
+    try std.testing.expect(result.items[0].changed and !result.items[1].changed);
+    try std.testing.expectApproxEqAbs(result.items[0].current.pp * 1.25, result.items[0].candidate.pp, 0.0000001);
+    for ([_]u32{ 0, 8 | 16 | double_time, autopilot, autopilot | 8 | double_time, score_v2 }) |mods| {
+        var request = stableFixture(mods);
+        const stable = try compare(std.testing.allocator, map, request);
+        try std.testing.expectEqualDeep(stable.current, stable.candidate);
+        if (mods & score_v2 == 0) {
+            request.source = .lazer;
+            request.input.lazer = 1;
+            request.mods_json = if (mods & autopilot != 0) "[{\"acronym\":\"AP\"}]" else "[]";
+            const modern = try compare(std.testing.allocator, map, request);
+            try std.testing.expectEqualDeep(modern.current, modern.candidate);
+        }
     }
 
     const records = [_]RecalculationRecord{
@@ -456,8 +466,9 @@ test "pp policy previews and recalculation plans include assisted balance change
     var plan = try planRecalculation(std.testing.allocator, &records);
     defer plan.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 2), plan.inspected);
-    try std.testing.expectEqual(@as(usize, 0), plan.unchanged);
-    try std.testing.expectEqual(@as(usize, 2), plan.updates.len);
+    try std.testing.expectEqual(@as(usize, 1), plan.unchanged);
+    try std.testing.expectEqual(@as(usize, 1), plan.updates.len);
+    try std.testing.expectEqual(@as(i64, 1), plan.updates[0].score_id);
 
     const oversized = [_]PreviewItem{preview_items[0]} ** (max_preview_items + 1);
     try std.testing.expectError(error.TooManyPreviewItems, preview(std.testing.allocator, &oversized));

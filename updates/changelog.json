@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 60,
+      "version": "2026.910.1",
+      "display_version": "the pp boost is for relax",
+      "created_at": "2026-09-10T10:30:00Z",
+      "updates": [
+        {
+          "name": "2026-09-10-relax-only-pp.md",
+          "created_at": "2026-09-10T10:30:00Z",
+          "commit": "",
+          "sha256": "f2df0e95d09aa67c229686438a8a5bc750fb9ed0d6dc9fa1ffc8c06fe6f6a240"
+        }
+      ]
+    },
+    {
       "id": 59,
       "version": "2026.910.0",
       "display_version": "pp has its own balance now",
