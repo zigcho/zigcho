@@ -3,6 +3,7 @@ const std = d.std;
 const storage = d.storage;
 const sqlite_storage = d.sqlite_storage;
 const pp = d.pp;
+const pp_admin = @import("../../pp_admin.zig");
 const config_mod = d.config_mod;
 const r2 = d.r2;
 const object_keys = d.object_keys;
@@ -35,7 +36,7 @@ pub fn recalcAllScores(allocator: std.mem.Allocator, store: *sqlite_storage.Stor
             continue;
         };
         defer allocator.free(map_file);
-        const result = pp.calculate(map_file, .{
+        const result = pp_admin.calculateStable(map_file, .{
             .mode = mode,
             .lazer = 0,
             .mods = @intCast(mods),

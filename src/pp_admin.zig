@@ -1,11 +1,12 @@
 const std = @import("std");
 const exact = @import("exact_pp.zig");
+pub const balance = @import("pp_balance.zig");
 
 // Zigcho owns this policy boundary. The pinned projects below it still own the
 // difficulty and performance formulae until a candidate is proven against real
 // scores. A policy bump therefore says what Zigcho changed without pretending
 // an upstream dependency is first-party math.
-pub const policy_version = "zigcho-pp-policy-1";
+pub const policy_version = "zigcho-pp-policy-2";
 pub const upstream_engine_version = exact.engine_version;
 
 pub const max_map_bytes: usize = 64 * 1024 * 1024;
@@ -256,15 +257,22 @@ fn calculateCurrent(map: []const u8, request: Request) !exact.Output {
 }
 
 fn calculateNormalized(map: []const u8, request: NormalizedRequest) !exact.Output {
-    return switch (request.source) {
+    var output = try switch (request.source) {
         .stable => exact.calculate(map, request.input),
         .lazer => if (request.namespace == .vanilla)
             exact.calculateLazer(map, request.mods_json, request.input)
+        else if (request.namespace == .relax)
+            exact.calculateRelax(map, request.input, request.rate.multiplier)
         else
-            // Relax/AP stay on their existing pinned path. The candidate layer
-            // records them, but does not change their formula or input.
             exact.calculate(map, request.input),
     };
+    output.pp = try balance.apply(output.pp, request.input.mods, request.rate.multiplier);
+    return output;
+}
+
+pub fn calculateStable(map: []const u8, input: exact.Input) !exact.Output {
+    if (input.lazer != 0) return error.SourceMismatch;
+    return calculate(std.heap.page_allocator, map, .{ .source = .stable, .namespace = stableNamespace(input.mods), .input = input });
 }
 
 // This is the single-calculation entry point for live callers once they move
@@ -381,7 +389,8 @@ fn stableFixture(mods: u32) Request {
 test "pp policy exposes its owned version and stable baseline" {
     const version = try versionAlloc(std.testing.allocator);
     defer std.testing.allocator.free(version);
-    try std.testing.expectEqualStrings("zigcho-pp-policy-1/stable-rosu-4.0.1-lazer-2026.730.0-1129a7e-akatsuki-591de0d.1", version);
+    try std.testing.expect(std.mem.startsWith(u8, version, "zigcho-pp-policy-2/"));
+    try std.testing.expect(std.mem.endsWith(u8, version, "-zigcho-balance-1-rxrate"));
 
     const map = @embedFile("testdata/synthetic-standard.osu");
     const comparison = try compare(std.testing.allocator, map, stableFixture(double_time | nightcore));
@@ -389,8 +398,9 @@ test "pp policy exposes its owned version and stable baseline" {
     try std.testing.expectEqual(Namespace.vanilla, comparison.namespace);
     try std.testing.expectEqual(RateMod.nightcore, comparison.rate.mod);
     try std.testing.expectApproxEqAbs(@as(f64, 1.5), comparison.rate.multiplier, 0.0000001);
-    try std.testing.expect(!comparison.changed);
-    try std.testing.expectApproxEqAbs(comparison.current.pp, comparison.candidate.pp, 0.0000001);
+    try std.testing.expect(comparison.changed);
+    try std.testing.expectApproxEqAbs(try balance.apply(comparison.current.pp, double_time | nightcore, 1.5), comparison.candidate.pp, 0.0000001);
+    try std.testing.expectEqual(comparison.current.stars, comparison.candidate.stars);
 
     const normalized = try normalize(std.testing.allocator, stableFixture(nightcore));
     try std.testing.expect(normalized.input.mods & double_time != 0);
@@ -418,11 +428,12 @@ test "pp policy keeps exact lazer rates in the comparison" {
     });
     try std.testing.expectEqual(RateMod.double_time, comparison.rate.mod);
     try std.testing.expectApproxEqAbs(@as(f64, 1.25), comparison.rate.multiplier, 0.0000001);
-    try std.testing.expectApproxEqAbs(@as(f64, 39.036597621743), comparison.candidate.pp, 0.0000001);
-    try std.testing.expect(!comparison.changed);
+    try std.testing.expectApproxEqAbs(@as(f64, 39.036597621743), comparison.current.pp, 0.0000001);
+    try std.testing.expectApproxEqAbs(try balance.apply(comparison.current.pp, double_time, 1.25), comparison.candidate.pp, 0.0000001);
+    try std.testing.expect(comparison.changed);
 }
 
-test "pp policy previews and recalculation plans stay bounded without changing relax or autopilot" {
+test "pp policy previews and recalculation plans include assisted balance changes" {
     const map = @embedFile("testdata/synthetic-standard.osu");
     const requests = [_]Request{ stableFixture(relax), stableFixture(autopilot) };
     const preview_items = [_]PreviewItem{
@@ -432,7 +443,11 @@ test "pp policy previews and recalculation plans stay bounded without changing r
     var result = try preview(std.testing.allocator, &preview_items);
     defer result.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 2), result.items.len);
-    try std.testing.expect(!result.items[0].changed and !result.items[1].changed);
+    try std.testing.expect(result.items[0].changed and result.items[1].changed);
+    for (result.items) |item| {
+        try std.testing.expectApproxEqAbs(item.current.pp * 1.25, item.candidate.pp, 0.0000001);
+        try std.testing.expectEqual(item.current.stars, item.candidate.stars);
+    }
 
     const records = [_]RecalculationRecord{
         .{ .score_id = 1, .map = map, .request = requests[0] },
@@ -441,9 +456,48 @@ test "pp policy previews and recalculation plans stay bounded without changing r
     var plan = try planRecalculation(std.testing.allocator, &records);
     defer plan.deinit(std.testing.allocator);
     try std.testing.expectEqual(@as(usize, 2), plan.inspected);
-    try std.testing.expectEqual(@as(usize, 2), plan.unchanged);
-    try std.testing.expectEqual(@as(usize, 0), plan.updates.len);
+    try std.testing.expectEqual(@as(usize, 0), plan.unchanged);
+    try std.testing.expectEqual(@as(usize, 2), plan.updates.len);
 
     const oversized = [_]PreviewItem{preview_items[0]} ** (max_preview_items + 1);
     try std.testing.expectError(error.TooManyPreviewItems, preview(std.testing.allocator, &oversized));
+}
+
+test "relax rates reach akatsuki once for dt nc and ht" {
+    const map = @embedFile("testdata/synthetic-standard.osu");
+    var request = stableFixture(relax | double_time);
+    request.source = .lazer;
+    request.input.lazer = 1;
+    request.mods_json = "[{\"acronym\":\"RX\"},{\"acronym\":\"DT\"}]";
+    const default = try compare(std.testing.allocator, map, request);
+    try std.testing.expectEqual(default.current.stars, default.candidate.stars);
+    try std.testing.expectApproxEqAbs(default.current.pp, default.candidate.pp / try balance.multiplier(request.input.mods, 1.5), 0.0000001);
+    request.mods_json = "[{\"acronym\":\"RX\"},{\"acronym\":\"DT\",\"settings\":{\"speed_change\":1.1}}]";
+    const slow = try calculate(std.testing.allocator, map, request);
+    request.mods_json = "[{\"acronym\":\"RX\"},{\"acronym\":\"DT\",\"settings\":{\"speed_change\":1.9}}]";
+    const fast = try calculate(std.testing.allocator, map, request);
+    try std.testing.expect(fast.pp > slow.pp and fast.stars > slow.stars);
+    request.input.mods |= nightcore;
+    request.mods_json = "[{\"acronym\":\"RX\"},{\"acronym\":\"NC\",\"settings\":{\"speed_change\":1.9}}]";
+    const nc = try calculate(std.testing.allocator, map, request);
+    try std.testing.expectApproxEqAbs(fast.pp, nc.pp, 0.0000001);
+    try std.testing.expectEqual(fast.stars, nc.stars);
+    request.input.mods = relax | half_time;
+    request.mods_json = "[{\"acronym\":\"RX\"},{\"acronym\":\"HT\",\"settings\":{\"speed_change\":0.9}}]";
+    const ht = try calculate(std.testing.allocator, map, request);
+    const raw_ht = try exact.calculateRelax(map, request.input, 0.9);
+    try std.testing.expectEqual(ht.stars, raw_ht.stars);
+    try std.testing.expectApproxEqAbs(try balance.apply(raw_ht.pp, request.input.mods, 0.9), ht.pp, 0.0000001);
+    try std.testing.expectError(error.InvalidClockRate, exact.calculateRelax(map, request.input, 0));
+    try std.testing.expectError(error.InvalidClockRate, exact.calculateRelax(map, request.input, std.math.nan(f64)));
+    for ([_]struct { mode: u8, map: []const u8 }{
+        .{ .mode = 1, .map = @embedFile("testdata/synthetic-taiko.osu") },
+        .{ .mode = 2, .map = @embedFile("testdata/synthetic-catch.osu") },
+    }) |fixture| {
+        request.input.mode = fixture.mode;
+        request.input.mods = relax | double_time;
+        const slower = try exact.calculateRelax(fixture.map, request.input, 1.1);
+        const faster = try exact.calculateRelax(fixture.map, request.input, 1.9);
+        try std.testing.expect(faster.stars > slower.stars);
+    }
 }

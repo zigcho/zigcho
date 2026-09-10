@@ -883,11 +883,11 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         if (std.mem.eql(u8, path, "/api/v1/staff/pp")) {
             if (!web_auth.canDevelop(staff_user)) return respond(req, .forbidden, "application/json", "{\"error\":\"developer access required\"}", &no_store);
             if (req.head.method == .GET) {
-                var metadata: [384]u8 = undefined;
+                var metadata: [768]u8 = undefined;
                 const json = try std.fmt.bufPrint(
                     &metadata,
-                    "{{\"policy\":\"{s}\",\"engine\":\"{s}\",\"max_map_bytes\":{d},\"max_mods_json_bytes\":{d},\"max_preview_items\":{d},\"max_recalculation_items\":{d},\"live\":true,\"apply\":false}}",
-                    .{ pp_admin.policy_version, pp_admin.upstream_engine_version, pp_admin.max_map_bytes, pp_admin.max_mods_json_bytes, pp_admin.max_preview_items, pp_admin.max_recalculation_items },
+                    "{{\"policy\":\"{s}\",\"engine\":\"{s}\",\"max_map_bytes\":{d},\"max_mods_json_bytes\":{d},\"max_preview_items\":{d},\"max_recalculation_items\":{d},\"balance\":{{\"version\":\"{s}\",\"base_multiplier\":{d},\"hidden_multiplier\":{d},\"hard_rock_multiplier\":{d},\"flashlight_multiplier\":{d},\"rate_exponent\":{d}}},\"live\":true,\"apply\":false}}",
+                    .{ pp_admin.policy_version, pp_admin.upstream_engine_version, pp_admin.max_map_bytes, pp_admin.max_mods_json_bytes, pp_admin.max_preview_items, pp_admin.max_recalculation_items, pp_admin.balance.version, pp_admin.balance.base_multiplier, pp_admin.balance.hidden_multiplier, pp_admin.balance.hard_rock_multiplier, pp_admin.balance.flashlight_multiplier, pp_admin.balance.rate_exponent },
                 );
                 return respond(req, .ok, "application/json", json, &no_store);
             }

@@ -1,6 +1,6 @@
 const std = @import("std");
 const domain = @import("domain.zig");
-const pp = @import("exact_pp.zig");
+const pp = @import("pp_admin.zig");
 const storage = @import("runtime_storage.zig");
 const beatmap = @import("beatmap.zig");
 const sessions_mod = @import("sessions.zig");
@@ -618,7 +618,7 @@ pub fn handleNp(allocator: std.mem.Allocator, store: *storage.Store, sender: *se
         const total_hits = meta.object_count;
         const n300_f: f64 = @max(0, @as(f64, @floatFromInt(total_hits)) * (3.0 * (accuracy / 100.0) - 1.0) / 2.0);
         const n300: u32 = @intFromFloat(@min(@as(f64, @floatFromInt(total_hits)), std.math.round(n300_f)));
-        const result = pp.calculate(map_file, .{
+        const result = pp.calculateStable(map_file, .{
             .mode = sender.mode,
             .lazer = 0,
             .mods = @intCast(sender.mods),
@@ -765,7 +765,7 @@ fn handleWith(allocator: std.mem.Allocator, store: *storage.Store, sender: *sess
     const n300_f: f64 = @max(0, @as(f64, @floatFromInt(total_hits)) * (3.0 * acc - 1.0) / 2.0);
     const n300: u32 = @intFromFloat(@min(@as(f64, @floatFromInt(total_hits)), std.math.round(n300_f)));
     const n100: u32 = total_hits -| n300;
-    const full_combo = try pp.calculate(map_file, .{
+    const full_combo = try pp.calculateStable(map_file, .{
         .mode = sender.mode,
         .lazer = 0,
         .mods = @intCast(mods),
@@ -781,7 +781,7 @@ fn handleWith(allocator: std.mem.Allocator, store: *storage.Store, sender: *sess
     const max_combo_f: f64 = @as(f64, @floatFromInt(full_combo.max_combo)) * combo_pct / 100.0;
     const max_combo: u32 = @intFromFloat(std.math.round(max_combo_f));
 
-    const result = pp.calculate(map_file, .{
+    const result = pp.calculateStable(map_file, .{
         .mode = sender.mode,
         .lazer = 0,
         .mods = @intCast(mods),

@@ -182,6 +182,7 @@ fn calculate_custom(
     map_bytes: &[u8],
     input: &ZigchoPpInput,
     passed: u32,
+    clock_rate: Option<f64>,
 ) -> Result<ZigchoPpOutput, ()> {
     let map = AkatsukiBeatmap::from_bytes(map_bytes).map_err(|_| ())?;
     let mode = akatsuki_mode(input.mode).ok_or(())?;
@@ -196,14 +197,17 @@ fn calculate_custom(
         n50: input.n50,
         misses: input.misses,
     };
-    let attributes = AkatsukiPerformance::new(&map)
+    let mut performance = AkatsukiPerformance::new(&map)
         .try_mode(mode)
         .map_err(|_| ())?
         .mods(input.mods)
         .lazer(input.lazer != 0)
         .passed_objects(passed)
-        .state(state)
-        .calculate();
+        .state(state);
+    if let Some(rate) = clock_rate {
+        performance = performance.clock_rate(rate);
+    }
+    let attributes = performance.calculate();
 
     Ok(ZigchoPpOutput {
         pp: attributes.pp(),
@@ -215,7 +219,7 @@ fn calculate_custom(
 fn calculate(map_bytes: &[u8], input: &ZigchoPpInput) -> Result<ZigchoPpOutput, ()> {
     let passed = passed_objects(input).ok_or(())?;
     if input.mods & (RELAX | AUTOPILOT) != 0 {
-        calculate_custom(map_bytes, input, passed)
+        calculate_custom(map_bytes, input, passed, None)
     } else {
         calculate_stable_vanilla(map_bytes, input, passed)
     }
@@ -274,6 +278,46 @@ pub unsafe extern "C" fn zigcho_pp_calculate(
         calculate(map_bytes, input)
     });
 
+    match result {
+        Ok(Ok(value)) => {
+            unsafe { output.write(value) };
+            0
+        }
+        Ok(Err(())) => 2,
+        Err(_) => 3,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zigcho_relax_pp_calculate(
+    map_ptr: *const u8,
+    map_len: usize,
+    input: *const ZigchoPpInput,
+    clock_rate: f64,
+    output: *mut ZigchoPpOutput,
+) -> i32 {
+    if map_ptr.is_null()
+        || map_len == 0
+        || input.is_null()
+        || output.is_null()
+        || !clock_rate.is_finite()
+        || !(0.01..=100.0).contains(&clock_rate)
+    {
+        return 1;
+    }
+    let result = catch_unwind(|| {
+        let map_bytes = unsafe { slice::from_raw_parts(map_ptr, map_len) };
+        let input = unsafe { &*input };
+        if input.mode > 2
+            || input.lazer == 0
+            || input.mods & RELAX == 0
+            || input.mods & AUTOPILOT != 0
+        {
+            return Err(());
+        }
+        let passed = passed_objects(input).ok_or(())?;
+        calculate_custom(map_bytes, input, passed, Some(clock_rate))
+    });
     match result {
         Ok(Ok(value)) => {
             unsafe { output.write(value) };
