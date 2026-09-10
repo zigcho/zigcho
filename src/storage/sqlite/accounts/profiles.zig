@@ -5,6 +5,9 @@ const visible_follower_count_sql = @import("../../../storage.zig").visible_follo
 const c = @import("../../../storage.zig").c;
 const Store = @import("../../../storage.zig").Store;
 const writeSiteScores = @import("../scores/website.zig").writeSiteScores;
+const writeSiteScorePage = @import("../scores/website.zig").writeSiteScorePage;
+const prepareSiteScorePage = @import("../scores/website.zig").prepareSiteScorePage;
+const paging = @import("../../../profile_paging.zig");
 const jsonString = @import("../beatmaps/lazer_listing.zig").jsonString;
 
 pub fn updateSiteProfile(self: *Store, user_id: i32, settings: domain.SiteProfileSettings) !void {
@@ -244,6 +247,11 @@ pub fn siteProfile(self: *Store, allocator: std.mem.Allocator, user_id: i32, sou
 }
 
 pub fn siteProfileForViewer(self: *Store, allocator: std.mem.Allocator, user_id: i32, source: domain.SiteScoreSource, stats_mode: u8, owner_view: bool) !?[]u8 {
+    return siteProfilePageForViewer(self, allocator, user_id, source, stats_mode, owner_view, null);
+}
+
+pub fn siteProfilePageForViewer(self: *Store, allocator: std.mem.Allocator, user_id: i32, source: domain.SiteScoreSource, stats_mode: u8, owner_view: bool, offset: ?u32) !?[]u8 {
+    if (offset) |start| if (!paging.validOffset(start)) return error.InvalidScoreOffset;
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
     const score_mode = domain.siteScoreMode(stats_mode);
@@ -326,11 +334,11 @@ pub fn siteProfileForViewer(self: *Store, allocator: std.mem.Allocator, user_id:
     };
     const pinned = try self.prepareSiteScores(pinned_sql, user_id, score_mode, namespace);
     defer _ = c.sqlite3_finalize(pinned);
-    const top = try self.prepareSiteScores(top_sql, user_id, score_mode, namespace);
+    const top = try prepareSiteScorePage(self, allocator, top_sql, user_id, score_mode, namespace, offset);
     defer _ = c.sqlite3_finalize(top);
-    const recent = try self.prepareSiteScores(recent_sql, user_id, score_mode, namespace);
+    const recent = try prepareSiteScorePage(self, allocator, recent_sql, user_id, score_mode, namespace, offset);
     defer _ = c.sqlite3_finalize(recent);
-    const firsts = try self.prepareSiteScores(first_sql, user_id, score_mode, namespace);
+    const firsts = try prepareSiteScorePage(self, allocator, first_sql, user_id, score_mode, namespace, offset);
     defer _ = c.sqlite3_finalize(firsts);
     var output: std.Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
@@ -393,14 +401,29 @@ pub fn siteProfileForViewer(self: *Store, allocator: std.mem.Allocator, user_id:
     try output.writer.writeAll("],\"pinned_scores\":");
     if (show_profile_stats) try writeSiteScores(&output.writer, pinned, false) else try output.writer.writeAll("[]");
     try output.writer.writeAll(",\"top_scores\":");
-    if (show_profile_stats) try writeSiteScores(&output.writer, top, true) else try output.writer.writeAll("[]");
+    const top_more = if (show_profile_stats) try writeSiteScorePage(&output.writer, top, true, offset orelse 0, if (offset != null) paging.page_size else std.math.maxInt(usize)) else empty: {
+        try output.writer.writeAll("[]");
+        break :empty false;
+    };
     try output.writer.writeAll(",\"recent_scores\":");
-    if (show_recent_scores) try writeSiteScores(&output.writer, recent, false) else try output.writer.writeAll("[]");
+    const recent_more = if (show_recent_scores) try writeSiteScorePage(&output.writer, recent, false, offset orelse 0, if (offset != null) paging.page_size else std.math.maxInt(usize)) else empty: {
+        try output.writer.writeAll("[]");
+        break :empty false;
+    };
     const first_step = if (show_profile_stats) c.sqlite3_step(firsts) else c.SQLITE_DONE;
-    const first_count: i64 = if (first_step == c.SQLITE_ROW) c.sqlite3_column_int64(firsts, 22) else 0;
+    var first_count: i64 = if (first_step == c.SQLITE_ROW) c.sqlite3_column_int64(firsts, 22) else 0;
+    if (show_profile_stats and first_step != c.SQLITE_ROW and (offset orelse 0) > 0) {
+        const first_page = try prepareSiteScorePage(self, allocator, first_sql, user_id, score_mode, namespace, 0);
+        defer _ = c.sqlite3_finalize(first_page);
+        if (c.sqlite3_step(first_page) == c.SQLITE_ROW) first_count = c.sqlite3_column_int64(first_page, 22);
+    }
     if (first_step == c.SQLITE_ROW) _ = c.sqlite3_reset(firsts);
     try output.writer.print(",\"first_place_count\":{d},\"first_place_scores\":", .{first_count});
-    if (show_profile_stats) try writeSiteScores(&output.writer, firsts, false) else try output.writer.writeAll("[]");
+    const first_more = if (show_profile_stats) try writeSiteScorePage(&output.writer, firsts, false, offset orelse 0, if (offset != null) paging.page_size else std.math.maxInt(usize)) else empty: {
+        try output.writer.writeAll("[]");
+        break :empty false;
+    };
+    if (offset) |start| try output.writer.print(",\"score_page\":{{\"offset\":{d},\"size\":25,\"top_more\":{},\"recent_more\":{},\"first_more\":{}}}", .{ start, top_more, recent_more, first_more });
     try output.writer.writeAll(",\"beatmapsets\":[");
     var mapped_sets: ?*c.sqlite3_stmt = null;
     if (c.sqlite3_prepare_v2(self.db, "SELECT set_id FROM beatmap_submissions WHERE owner_id=?1 AND state='published' ORDER BY updated_at DESC,set_id DESC LIMIT 50", -1, &mapped_sets, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;

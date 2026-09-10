@@ -3296,6 +3296,17 @@ test "score submissions refresh both sides of a daily rank swap" {
     try std.testing.expectEqual(@as(c_int, 2), storage.c.sqlite3_column_int(ranks, 1));
 }
 
+test "sqlite profile score pages keep weights firsts and privacy" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&path_buf, ".zig-cache/tmp/{s}/profile-pages.db", .{tmp.sub_path});
+    var store = try storage.Store.open(std.testing.allocator, std.testing.io, path);
+    defer store.close();
+    try store.migrate();
+    try @import("storage/tests/profile_pages.zig").verify(&store);
+}
+
 test "profile pins replace the selected map and keep three per stable score slice" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();

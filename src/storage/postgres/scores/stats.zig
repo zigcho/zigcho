@@ -7,6 +7,7 @@ const lazer = @import("../../../lazer.zig");
 const user_json = @import("../../../user_json.zig");
 const achievements = @import("../../../achievements.zig");
 const common = @import("../common.zig");
+const paging = @import("../../../profile_paging.zig");
 const pg_beatmap_catalog = @import("../beatmaps/catalog.zig");
 const pg_score_achievements = @import("../scores/achievements.zig");
 const pg_score_maintenance = @import("../scores/maintenance.zig");
@@ -163,8 +164,12 @@ pub fn siteRankings(self: anytype, allocator: std.mem.Allocator, source: domain.
 }
 
 pub fn writeSiteScores(writer: *std.Io.Writer, scores: *postgres.Result, include_weight: bool) !void {
+    return writeSiteScorePage(writer, scores, include_weight, 0, scores.rows());
+}
+
+fn writeSiteScorePage(writer: *std.Io.Writer, scores: *postgres.Result, include_weight: bool, offset: usize, limit: usize) !void {
     try writer.writeByte('[');
-    for (0..scores.rows()) |row| {
+    for (0..@min(scores.rows(), limit)) |row| {
         if (row != 0) try writer.writeByte(',');
         try writer.print("{{\"id\":{d},\"score\":{d},\"score_without_mods\":{d},\"legacy_score\":", .{ try scores.int(i64, row, 0), try scores.int(i64, row, 1), try scores.int(i64, row, 20) });
         if (scores.isNull(row, 21)) try writer.writeAll("null") else try writer.print("{d}", .{try scores.int(i32, row, 21)});
@@ -185,7 +190,7 @@ pub fn writeSiteScores(writer: *std.Io.Writer, scores: *postgres.Result, include
             try writer.writeAll(scores.value(row, 17));
         }
         if (include_weight) {
-            const percentage = 100.0 * std.math.pow(f64, 0.95, @floatFromInt(row));
+            const percentage = 100.0 * std.math.pow(f64, 0.95, @floatFromInt(offset + row));
             const weighted_pp = try scores.float(f64, row, 2) * percentage / 100.0;
             try writer.print(",\"weight\":{{\"percentage\":{d:.2},\"pp\":{d:.2}}}", .{ percentage, weighted_pp });
         }
@@ -199,6 +204,22 @@ pub fn siteProfile(self: anytype, allocator: std.mem.Allocator, user_id: i32, so
 }
 
 pub fn siteProfileForViewer(self: anytype, allocator: std.mem.Allocator, user_id: i32, source: domain.SiteScoreSource, stats_mode: u8, owner_view: bool) !?[]u8 {
+    return siteProfilePageForViewer(self, allocator, user_id, source, stats_mode, owner_view, null);
+}
+
+fn scorePageQuery(allocator: std.mem.Allocator, conn: *postgres.c.PGconn, sql: [:0]const u8, user: []const u8, mode: []const u8, namespace: []const u8, offset: ?u32) !postgres.Result {
+    if (offset) |start| {
+        const paged = try paging.query(allocator, sql, true);
+        defer allocator.free(paged);
+        var buffer: [16]u8 = undefined;
+        const start_text = try std.fmt.bufPrint(&buffer, "{d}", .{start});
+        return postgres.queryParams(allocator, conn, paged, &.{ user, mode, namespace, "26", start_text });
+    }
+    return postgres.queryParams(allocator, conn, sql, &.{ user, mode, namespace });
+}
+
+pub fn siteProfilePageForViewer(self: anytype, allocator: std.mem.Allocator, user_id: i32, source: domain.SiteScoreSource, stats_mode: u8, owner_view: bool, offset: ?u32) !?[]u8 {
+    if (offset) |start| if (!paging.validOffset(start)) return error.InvalidScoreOffset;
     if (user_id <= 0 or !domain.validSiteMode(source, stats_mode)) return error.InvalidStatsHistory;
     var id_buf: [24]u8 = undefined;
     var score_mode_buf: [4]u8 = undefined;
@@ -271,11 +292,11 @@ pub fn siteProfileForViewer(self: anytype, allocator: std.mem.Allocator, user_id
     };
     var pinned = try postgres.queryParams(allocator, lease.conn, pinned_sql, &.{ id, score_mode_text, namespace });
     defer pinned.deinit();
-    var top = try postgres.queryParams(allocator, lease.conn, top_sql, &.{ id, score_mode_text, namespace });
+    var top = try scorePageQuery(allocator, lease.conn, top_sql, id, score_mode_text, namespace, offset);
     defer top.deinit();
-    var recent = try postgres.queryParams(allocator, lease.conn, recent_sql, &.{ id, score_mode_text, namespace });
+    var recent = try scorePageQuery(allocator, lease.conn, recent_sql, id, score_mode_text, namespace, offset);
     defer recent.deinit();
-    var firsts = try postgres.queryParams(allocator, lease.conn, first_sql, &.{ id, score_mode_text, namespace });
+    var firsts = try scorePageQuery(allocator, lease.conn, first_sql, id, score_mode_text, namespace, offset);
     defer firsts.deinit();
     var output: std.Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
@@ -339,12 +360,18 @@ pub fn siteProfileForViewer(self: anytype, allocator: std.mem.Allocator, user_id
     try output.writer.writeAll("],\"pinned_scores\":");
     if (show_profile_stats) try writeSiteScores(&output.writer, &pinned, false) else try output.writer.writeAll("[]");
     try output.writer.writeAll(",\"top_scores\":");
-    if (show_profile_stats) try writeSiteScores(&output.writer, &top, true) else try output.writer.writeAll("[]");
+    if (show_profile_stats) try writeSiteScorePage(&output.writer, &top, true, offset orelse 0, if (offset != null) paging.page_size else top.rows()) else try output.writer.writeAll("[]");
     try output.writer.writeAll(",\"recent_scores\":");
-    if (show_recent_scores) try writeSiteScores(&output.writer, &recent, false) else try output.writer.writeAll("[]");
-    const first_count: i64 = if (!show_profile_stats or firsts.rows() == 0) 0 else try firsts.int(i64, 0, 22);
+    if (show_recent_scores) try writeSiteScorePage(&output.writer, &recent, false, offset orelse 0, if (offset != null) paging.page_size else recent.rows()) else try output.writer.writeAll("[]");
+    var first_count: i64 = if (!show_profile_stats or firsts.rows() == 0) 0 else try firsts.int(i64, 0, 22);
+    if (show_profile_stats and firsts.rows() == 0 and (offset orelse 0) > 0) {
+        var first_page = try scorePageQuery(allocator, lease.conn, first_sql, id, score_mode_text, namespace, 0);
+        defer first_page.deinit();
+        if (first_page.rows() > 0) first_count = try first_page.int(i64, 0, 22);
+    }
     try output.writer.print(",\"first_place_count\":{d},\"first_place_scores\":", .{first_count});
-    if (show_profile_stats) try writeSiteScores(&output.writer, &firsts, false) else try output.writer.writeAll("[]");
+    if (show_profile_stats) try writeSiteScorePage(&output.writer, &firsts, false, offset orelse 0, if (offset != null) paging.page_size else firsts.rows()) else try output.writer.writeAll("[]");
+    if (offset) |start| try output.writer.print(",\"score_page\":{{\"offset\":{d},\"size\":25,\"top_more\":{},\"recent_more\":{},\"first_more\":{}}}", .{ start, show_profile_stats and top.rows() > paging.page_size, show_recent_scores and recent.rows() > paging.page_size, show_profile_stats and firsts.rows() > paging.page_size });
     try output.writer.writeAll(",\"beatmapsets\":[");
     var mapped_sets = try postgres.queryParams(allocator, lease.conn, "SELECT set_id FROM zigcho.beatmap_submissions WHERE owner_id=$1 AND state='published' ORDER BY updated_at DESC,set_id DESC LIMIT 50", &.{id});
     defer mapped_sets.deinit();

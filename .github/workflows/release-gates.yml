@@ -20,6 +20,7 @@ on:
           - score-chart
           - mirror
           - pp
+          - profile-pages
   push:
     branches:
       - main
@@ -284,6 +285,22 @@ jobs:
               -e "ZIGCHO_TEST_POSTGRES_STORE_URL=host=127.0.0.1 port=5432 dbname=$database_name user=zigcho password=zigcho-gate connect_timeout=5" \
               "zigcho-release-gate:${GITHUB_SHA}" \
               zig build test "-Doptimize=$optimization" -Dtest-filter="pp policy" -Dtest-filter="pp balance" -Dtest-filter="relax rates" -Dtest-filter="akatsuki" -Dtest-filter="ranked stable PP is stored" -Dtest-filter="postgres account auth stats and token slice"
+          done
+
+      - name: verify profile score pages
+        if: needs.classify.outputs.is_hotfix != 'true' && github.event_name == 'workflow_dispatch' && inputs.test_scope == 'profile-pages'
+        timeout-minutes: 12
+        env:
+          PGPASSWORD: zigcho-gate
+        run: |
+          set -euo pipefail
+          for optimization in Debug ReleaseSafe; do
+            database_name="zigcho_pages_$(printf '%s' "$optimization" | tr '[:upper:]' '[:lower:]')"
+            createdb -h 127.0.0.1 -U zigcho "$database_name"
+            docker run --rm --network host \
+              -e "ZIGCHO_TEST_POSTGRES_PROFILE_PAGES_URL=host=127.0.0.1 port=5432 dbname=$database_name user=zigcho password=zigcho-gate connect_timeout=5" \
+              "zigcho-release-gate:${GITHUB_SHA}" \
+              zig build test "-Doptimize=$optimization" -Dtest-filter="profile score pages" -Dtest-filter="website profile plays keep"
           done
 
       - name: run focused correction tests

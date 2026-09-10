@@ -1350,12 +1350,14 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             defer freeUser(self.allocator, viewer_user);
             break :viewer viewer_user.id;
         };
+        const score_offset = std.fmt.parseInt(u32, queryField(target, "score_offset") orelse "0", 10) catch return respond(req, .bad_request, "application/json", "{\"error\":\"invalid score offset\"}", &.{});
+        if (!@import("../../profile_paging.zig").validOffset(score_offset)) return respond(req, .bad_request, "application/json", "{\"error\":\"invalid score offset\"}", &.{});
         const profile = if (user_id == 3) bot_profile: {
             const bot_user = (try self.store.userById(self.allocator, user_id)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &.{});
             defer freeUser(self.allocator, bot_user);
             break :bot_profile try user_json.siteBotProfileOwned(self.allocator, bot_user);
         } else player_profile: {
-            break :player_profile (try self.store.siteProfileForViewer(self.allocator, user_id, source, mode, viewer_id != null and viewer_id.? == user_id)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &.{});
+            break :player_profile (try self.store.siteProfilePageForViewer(self.allocator, user_id, source, mode, viewer_id != null and viewer_id.? == user_id, score_offset)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &.{});
         };
         defer self.allocator.free(profile);
         const with_presence = try self.attachProfilePresence(profile, user_id, viewer_id);

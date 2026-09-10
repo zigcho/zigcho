@@ -758,6 +758,9 @@ pub const Store = struct {
     pub fn siteProfileForViewer(self: *Store, allocator: std.mem.Allocator, user_id: i32, source: domain.SiteScoreSource, stats_mode: u8, owner_view: bool) !?[]u8 {
         return pg_score_stats.siteProfileForViewer(self, allocator, user_id, source, stats_mode, owner_view);
     }
+    pub fn siteProfilePageForViewer(self: *Store, allocator: std.mem.Allocator, user_id: i32, source: domain.SiteScoreSource, stats_mode: u8, owner_view: bool, offset: ?u32) !?[]u8 {
+        return pg_score_stats.siteProfilePageForViewer(self, allocator, user_id, source, stats_mode, owner_view, offset);
+    }
     pub fn siteBeatmapLeaderboard(self: *Store, allocator: std.mem.Allocator, map_id: i32, source: domain.SiteScoreSource, stats_mode: u8) !?[]u8 {
         return pg_score_stats.siteBeatmapLeaderboard(self, allocator, map_id, source, stats_mode);
     }

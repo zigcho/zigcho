@@ -3,6 +3,19 @@ const domain = @import("../../../domain.zig");
 const c = @import("../../../storage.zig").c;
 const Store = @import("../../../storage.zig").Store;
 const jsonString = @import("../beatmaps/lazer_listing.zig").jsonString;
+const paging = @import("../../../profile_paging.zig");
+
+pub fn prepareSiteScorePage(self: *Store, allocator: std.mem.Allocator, sql: [:0]const u8, user_id: i32, score_mode: u8, namespace: []const u8, offset: ?u32) !*c.sqlite3_stmt {
+    if (offset) |start| {
+        const paged = try paging.query(allocator, sql, false);
+        defer allocator.free(paged);
+        const stmt = try prepareSiteScores(self, paged, user_id, score_mode, namespace);
+        _ = c.sqlite3_bind_int(stmt, 4, paging.page_size + 1);
+        _ = c.sqlite3_bind_int64(stmt, 5, start);
+        return stmt;
+    }
+    return prepareSiteScores(self, sql, user_id, score_mode, namespace);
+}
 
 pub fn prepareSiteScores(self: *Store, sql: [:0]const u8, user_id: i32, score_mode: u8, namespace: []const u8) !*c.sqlite3_stmt {
     var stmt: ?*c.sqlite3_stmt = null;
@@ -14,10 +27,19 @@ pub fn prepareSiteScores(self: *Store, sql: [:0]const u8, user_id: i32, score_mo
 }
 
 pub fn writeSiteScores(writer: *std.Io.Writer, scores: *c.sqlite3_stmt, include_weight: bool) !void {
+    _ = try writeSiteScorePage(writer, scores, include_weight, 0, std.math.maxInt(usize));
+}
+
+pub fn writeSiteScorePage(writer: *std.Io.Writer, scores: *c.sqlite3_stmt, include_weight: bool, offset: usize, limit: usize) !bool {
     try writer.writeByte('[');
     var first = true;
     var position: usize = 0;
+    var more = false;
     while (c.sqlite3_step(scores) == c.SQLITE_ROW) {
+        if (position == limit) {
+            more = true;
+            break;
+        }
         if (!first) try writer.writeByte(',');
         first = false;
         try writer.print("{{\"id\":{d},\"score\":{d},\"score_without_mods\":{d},\"legacy_score\":", .{ c.sqlite3_column_int64(scores, 0), c.sqlite3_column_int64(scores, 1), c.sqlite3_column_int64(scores, 20) });
@@ -39,7 +61,7 @@ pub fn writeSiteScores(writer: *std.Io.Writer, scores: *c.sqlite3_stmt, include_
             try writer.writeAll(std.mem.span(c.sqlite3_column_text(scores, 17)));
         }
         if (include_weight) {
-            const percentage = 100.0 * std.math.pow(f64, 0.95, @floatFromInt(position));
+            const percentage = 100.0 * std.math.pow(f64, 0.95, @floatFromInt(offset + position));
             const weighted_pp = c.sqlite3_column_double(scores, 2) * percentage / 100.0;
             try writer.print(",\"weight\":{{\"percentage\":{d:.2},\"pp\":{d:.2}}}", .{ percentage, weighted_pp });
         }
@@ -47,6 +69,7 @@ pub fn writeSiteScores(writer: *std.Io.Writer, scores: *c.sqlite3_stmt, include_
         position += 1;
     }
     try writer.writeByte(']');
+    return more;
 }
 
 pub fn siteBeatmapLeaderboard(self: *Store, allocator: std.mem.Allocator, map_id: i32, source: domain.SiteScoreSource, stats_mode: u8) !?[]u8 {

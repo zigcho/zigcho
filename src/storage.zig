@@ -505,6 +505,7 @@ pub const Store = struct {
     pub const siteProfile = @import("storage/sqlite/accounts/profiles.zig").siteProfile;
 
     pub const siteProfileForViewer = @import("storage/sqlite/accounts/profiles.zig").siteProfileForViewer;
+    pub const siteProfilePageForViewer = @import("storage/sqlite/accounts/profiles.zig").siteProfilePageForViewer;
 
     pub const siteBeatmapLeaderboard = @import("storage/sqlite/scores/website.zig").siteBeatmapLeaderboard;
 
