@@ -53,6 +53,29 @@ pub fn verify(store: anytype) !void {
         if (index == 0) _ = try store.setScorePinned(user, hash, 0, 0, "vanilla", true);
     }
     for ([_]domain.SiteScoreSource{ .all, .stable, .lazer }) |source| {
+        const details = @import("../profile_details.zig");
+        const filter: details.Filter = .{ .source = source, .mode = 0 };
+        const metrics = try details.metrics(store, allocator, user, filter);
+        defer allocator.free(metrics);
+        var metrics_json = try std.json.parseFromSlice(std.json.Value, allocator, metrics, .{});
+        defer metrics_json.deinit();
+        try std.testing.expectEqual(@as(i64, 61), metrics_json.value.object.get("played_beatmap_count").?.integer);
+        try std.testing.expectEqual(@as(i64, 61), metrics_json.value.object.get("grade_ss").?.integer);
+        try std.testing.expectEqual(@as(i64, if (source == .lazer) 0 else 610), metrics_json.value.object.get("total_hits").?.integer);
+        const monthly = try details.monthly(store, allocator, user, filter, false);
+        defer allocator.free(monthly);
+        var monthly_json = try std.json.parseFromSlice(std.json.Value, allocator, monthly, .{});
+        defer monthly_json.deinit();
+        try std.testing.expectEqual(@as(i64, if (source == .all) 122 else 61), monthly_json.value.array.items[0].object.get("count").?.integer);
+        for ([_]bool{ false, true }) |activity| {
+            const rows = try details.collection(store, allocator, user, filter, activity, 0);
+            defer allocator.free(rows);
+            var rows_json = try std.json.parseFromSlice(std.json.Value, allocator, rows, .{});
+            defer rows_json.deinit();
+            try std.testing.expectEqual(@as(usize, 25), rows_json.value.array.items.len);
+            if (!activity) try std.testing.expectEqual(@as(i64, if (source == .all) 2 else 1), rows_json.value.array.items[0].object.get("count").?.integer);
+            if (activity and source != .all) for (rows_json.value.array.items) |row| try std.testing.expectEqualStrings(@tagName(source), row.object.get("client").?.string);
+        }
         var previous: [3]i64 = .{ 0, 0, 0 };
         for ([_]u32{ 0, 25, 50, 75 }) |offset| {
             const body = (try store.siteProfilePageForViewer(allocator, user, source, 0, false, offset)).?;
@@ -79,6 +102,11 @@ pub fn verify(store: anytype) !void {
             try std.testing.expectEqual(@as(usize, if (source == .lazer) 0 else 1), profile.get("pinned_scores").?.array.items.len);
         }
     }
+    for ([_]@import("../profile_details.zig").Filter{ .{ .source = .all, .mode = 4 }, .{ .source = .all, .mode = 8 }, .{ .source = .scorev2, .mode = 0 }, .{ .source = .stable, .mode = 1 } }) |filter| {
+        const rows = try @import("../profile_details.zig").collection(store, allocator, user, filter, true, 0);
+        defer allocator.free(rows);
+        try std.testing.expectEqualStrings("[]", rows);
+    }
     try std.testing.expectError(error.InvalidScoreOffset, store.siteProfilePageForViewer(allocator, user, .all, 0, false, 26));
     try store.updateSiteProfile(user, .{ .bio = "", .title = "", .pronouns = "", .location = "", .website = "", .accent = .pink, .preferred_mode = 0, .profile_source = .all, .avatar_key = 1, .show_country = true, .show_profile_stats = false, .show_recent_scores = false });
     const hidden = (try store.siteProfilePageForViewer(allocator, user, .all, 0, false, 25)).?;
@@ -87,4 +115,19 @@ pub fn verify(store: anytype) !void {
     defer parsed.deinit();
     for ([_][]const u8{ "top_scores", "recent_scores", "first_place_scores", "pinned_scores" }) |field| try std.testing.expectEqual(@as(usize, 0), parsed.value.object.get(field).?.array.items.len);
     for ([_][]const u8{ "top_more", "recent_more", "first_more" }) |field| try std.testing.expect(!parsed.value.object.get("score_page").?.object.get(field).?.bool);
+    try store.setRestricted(3, user, true, "profile visibility fixture");
+    try std.testing.expect((try store.siteProfilePageForViewer(allocator, user, .all, 0, false, 0)) == null);
+    try std.testing.expect((try store.siteNameHistoryJson(allocator, user)) == null);
+    const history = (try store.siteNameHistoryForViewerJson(allocator, user, true)).?;
+    defer allocator.free(history);
+    for ([_]domain.SiteScoreSource{ .all, .stable, .lazer }) |source| {
+        const owned = (try store.siteProfilePageForViewer(allocator, user, source, 0, true, 25)).?;
+        defer allocator.free(owned);
+        var visible = try std.json.parseFromSlice(std.json.Value, allocator, owned, .{});
+        defer visible.deinit();
+        try std.testing.expect(visible.value.object.get("restricted").?.bool);
+        try std.testing.expectEqual(@as(usize, 25), visible.value.object.get("top_scores").?.array.items.len);
+        try std.testing.expectEqual(@as(i64, 0), visible.value.object.get("selected_stats").?.object.get("global_rank").?.integer);
+        try std.testing.expectEqual(@as(i64, 0), visible.value.object.get("first_place_count").?.integer);
+    }
 }

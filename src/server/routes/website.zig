@@ -68,6 +68,7 @@ const Result = @import("result.zig").Result;
 const primitives = @import("../http/primitives.zig");
 const support = @import("../support.zig");
 const lifecycle = @import("../lifecycle.zig");
+const profile_access = @import("../../profile_access.zig");
 
 const header = primitives.header;
 const respond = primitives.respond;
@@ -118,6 +119,9 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
     const csrf_owned = ctx.csrf_owned;
     const origin_owned = ctx.origin_owned;
     const body = ctx.body;
+    if (try @import("profile.zig").handle(self, req, ctx)) return;
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/profile.js")) return respond(req, .ok, "text/javascript; charset=utf-8", @embedFile("../../web/profile.js"), &.{.{ .name = "cache-control", .value = "no-cache" }});
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/profile.css")) return respond(req, .ok, "text/css; charset=utf-8", @embedFile("../../web/profile.css"), &.{.{ .name = "cache-control", .value = "no-cache" }});
     if (std.mem.eql(u8, path, "/api/v1/appeals")) {
         const no_store = [_]std.http.Header{
             .{ .name = "cache-control", .value = "no-store" },
@@ -1323,9 +1327,10 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             break :resolve found.id;
         };
         if (user_id <= 0) return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &.{});
-        const history = (try self.store.siteNameHistoryJson(self.allocator, user_id)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &.{});
+        const access = if (web_auth.websiteHost(host_owned)) try profile_access.resolve(&self.store, self.allocator, cookie_owned, user_id) else profile_access.Access{};
+        const history = (try self.store.siteNameHistoryForViewerJson(self.allocator, user_id, access.privateView())) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &.{.{ .name = "cache-control", .value = "private, no-store" }});
         defer self.allocator.free(history);
-        return respond(req, .ok, "application/json", history, &.{.{ .name = "cache-control", .value = "public, max-age=60" }});
+        return respond(req, .ok, "application/json", history, &.{ .{ .name = "cache-control", .value = "private, no-store" }, .{ .name = "vary", .value = "Cookie" } });
     }
     if (req.head.method == .GET and std.mem.startsWith(u8, path, "/api/v1/users/")) {
         const encoded_identifier = path["/api/v1/users/".len..];
@@ -1344,12 +1349,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         const source = domain.parseSiteScoreSource(queryField(target, "source") orelse "all") orelse return respond(req, .bad_request, "application/json", "{\"error\":\"invalid source\"}", &.{});
         const mode = std.fmt.parseInt(u8, queryField(target, "mode") orelse "0", 10) catch return respond(req, .bad_request, "application/json", "{\"error\":\"invalid mode\"}", &.{});
         if (!domain.validSiteMode(source, mode)) return respond(req, .bad_request, "application/json", "{\"error\":\"invalid mode\"}", &.{});
-        const viewer_id: ?i32 = viewer: {
-            const token = web_auth.playerSessionToken(cookie_owned) orelse break :viewer null;
-            const viewer_user = (try self.store.authenticateToken(self.allocator, token, web_auth.player_scope)) orelse break :viewer null;
-            defer freeUser(self.allocator, viewer_user);
-            break :viewer viewer_user.id;
-        };
+        const access = if (web_auth.websiteHost(host_owned)) try profile_access.resolve(&self.store, self.allocator, cookie_owned, user_id) else profile_access.Access{};
         const score_offset = std.fmt.parseInt(u32, queryField(target, "score_offset") orelse "0", 10) catch return respond(req, .bad_request, "application/json", "{\"error\":\"invalid score offset\"}", &.{});
         if (!@import("../../profile_paging.zig").validOffset(score_offset)) return respond(req, .bad_request, "application/json", "{\"error\":\"invalid score offset\"}", &.{});
         const profile = if (user_id == 3) bot_profile: {
@@ -1357,12 +1357,14 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             defer freeUser(self.allocator, bot_user);
             break :bot_profile try user_json.siteBotProfileOwned(self.allocator, bot_user);
         } else player_profile: {
-            break :player_profile (try self.store.siteProfilePageForViewer(self.allocator, user_id, source, mode, viewer_id != null and viewer_id.? == user_id, score_offset)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &.{});
+            break :player_profile (try self.store.siteProfilePageForViewer(self.allocator, user_id, source, mode, access.privateView(), score_offset)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &.{.{ .name = "cache-control", .value = "private, no-store" }});
         };
         defer self.allocator.free(profile);
-        const with_presence = try self.attachProfilePresence(profile, user_id, viewer_id);
+        const with_access = try profile_access.attach(self.allocator, profile, access);
+        defer self.allocator.free(with_access);
+        const with_presence = try self.attachProfilePresence(with_access, user_id, access.viewer_id);
         defer self.allocator.free(with_presence);
-        return respond(req, .ok, "application/json", with_presence, &.{.{ .name = "cache-control", .value = "no-store" }});
+        return respond(req, .ok, "application/json", with_presence, &.{ .{ .name = "cache-control", .value = "private, no-store" }, .{ .name = "vary", .value = "Cookie" } });
     }
     if (req.head.method == .GET and std.mem.startsWith(u8, path, "/api/v1/beatmapsets/")) {
         const set_id = std.fmt.parseInt(i32, path["/api/v1/beatmapsets/".len..], 10) catch return respond(req, .bad_request, "application/json", "{\"error\":\"invalid beatmap set\"}", &.{});

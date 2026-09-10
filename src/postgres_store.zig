@@ -468,6 +468,9 @@ pub const Store = struct {
     pub fn siteNameHistoryJson(self: *Store, allocator: std.mem.Allocator, user_id: i32) !?[]u8 {
         return pg_accounts.siteNameHistoryJson(self, allocator, user_id);
     }
+    pub fn siteNameHistoryForViewerJson(self: *Store, allocator: std.mem.Allocator, user_id: i32, private_view: bool) !?[]u8 {
+        return pg_accounts.siteNameHistoryForViewerJson(self, allocator, user_id, private_view);
+    }
     pub fn friendIds(self: *Store, allocator: std.mem.Allocator, user_id: i32) ![]i32 {
         return pg_social.friendIds(self, allocator, user_id);
     }

@@ -23,10 +23,11 @@ const schema_version = postgres_store.schema_version;
 
 test "postgres profile score pages keep weights firsts and privacy" {
     const conninfo = std.c.getenv("ZIGCHO_TEST_POSTGRES_PROFILE_PAGES_URL") orelse return error.SkipZigTest;
-    var store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(conninfo));
-    defer store.close();
-    try store.migrate();
-    try @import("../tests/profile_pages.zig").verify(&store);
+    var app = .{ .allocator = std.testing.allocator, .store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(conninfo)) };
+    defer app.store.close();
+    try app.store.migrate();
+    try @import("../tests/profile_pages.zig").verify(&app.store);
+    try @import("../tests/profile_routes.zig").verify(&app);
 }
 
 test "postgres stable score response preserves the existing personal best before submission" {

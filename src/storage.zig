@@ -271,6 +271,7 @@ pub const Store = struct {
     pub const userByName = @import("storage/sqlite/accounts/authentication.zig").userByName;
 
     pub const siteNameHistoryJson = @import("storage/sqlite/accounts/profiles.zig").siteNameHistoryJson;
+    pub const siteNameHistoryForViewerJson = @import("storage/sqlite/accounts/profiles.zig").siteNameHistoryForViewerJson;
 
     pub const friendIds = @import("storage/sqlite/social/relationships.zig").friendIds;
 

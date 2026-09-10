@@ -590,6 +590,10 @@ pub fn userByName(self: anytype, allocator: std.mem.Allocator, name: []const u8)
 }
 
 pub fn siteNameHistoryJson(self: anytype, allocator: std.mem.Allocator, user_id: i32) !?[]u8 {
+    return siteNameHistoryForViewerJson(self, allocator, user_id, false);
+}
+
+pub fn siteNameHistoryForViewerJson(self: anytype, allocator: std.mem.Allocator, user_id: i32, private_view: bool) !?[]u8 {
     var id_buf: [24]u8 = undefined;
     const id = try std.fmt.bufPrint(&id_buf, "{d}", .{user_id});
     var lease = self.pool.acquire();
@@ -597,8 +601,8 @@ pub fn siteNameHistoryJson(self: anytype, allocator: std.mem.Allocator, user_id:
     const sql =
         "SELECT u.id,u.name,h.old_name,h.changed_at FROM zigcho.users u " ++
         "LEFT JOIN LATERAL (SELECT old_name,changed_at,id FROM zigcho.user_name_changes WHERE user_id=u.id ORDER BY changed_at DESC,id DESC LIMIT 20) h ON true " ++
-        "WHERE u.id=$1 AND u.id!=3 AND NOT u.restricted ORDER BY h.changed_at DESC,h.id DESC";
-    var result = try postgres.queryParams(allocator, lease.conn, sql, &.{id});
+        "WHERE u.id=$1 AND u.id!=3 AND (NOT u.restricted OR $2::boolean) ORDER BY h.changed_at DESC,h.id DESC";
+    var result = try postgres.queryParams(allocator, lease.conn, sql, &.{ id, if (private_view) "true" else "false" });
     defer result.deinit();
     if (result.rows() == 0) return null;
 

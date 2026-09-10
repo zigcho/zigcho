@@ -134,7 +134,7 @@ pub fn sessionJson(allocator: std.mem.Allocator, user: domain.User, csrf: [64]u8
     errdefer output.deinit();
     try output.writer.print("{{\"user\":{{\"id\":{d},\"name\":", .{user.id});
     try std.json.Stringify.value(user.name, .{}, &output.writer);
-    try output.writer.print(",\"country\":\"{s}\",\"privileges\":{d}}},\"csrf\":\"{s}\"}}", .{ &user.country, user.privileges, &csrf });
+    try output.writer.print(",\"country\":\"{s}\",\"privileges\":{d},\"restricted\":{}}},\"csrf\":\"{s}\"}}", .{ &user.country, user.privileges, user.restricted, &csrf });
     var list = output.toArrayList();
     return list.toOwnedSlice(allocator);
 }

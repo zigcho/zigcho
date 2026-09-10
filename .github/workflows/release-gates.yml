@@ -300,7 +300,7 @@ jobs:
             docker run --rm --network host \
               -e "ZIGCHO_TEST_POSTGRES_PROFILE_PAGES_URL=host=127.0.0.1 port=5432 dbname=$database_name user=zigcho password=zigcho-gate connect_timeout=5" \
               "zigcho-release-gate:${GITHUB_SHA}" \
-              zig build test "-Doptimize=$optimization" -Dtest-filter="profile score pages" -Dtest-filter="website profile plays keep"
+              zig build test "-Doptimize=$optimization" -Dtest-filter="profile score pages" -Dtest-filter="website profile plays keep" -Dtest-filter="restricted profile access" -Dtest-filter="staff authorization"
           done
 
       - name: run focused correction tests

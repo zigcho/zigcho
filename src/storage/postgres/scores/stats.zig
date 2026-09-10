@@ -231,7 +231,7 @@ pub fn siteProfilePageForViewer(self: anytype, allocator: std.mem.Allocator, use
     const namespace = domain.siteNamespace(source, stats_mode);
     var lease = self.pool.acquire();
     defer lease.release();
-    const user_sql = "SELECT u.id,u.name,CASE WHEN $2::boolean OR u.show_country THEN u.country ELSE 'XX' END,u.privileges,u.created_at,u.bio,u.preferred_mode,u.profile_source,coalesce((SELECT updated_at FROM zigcho.user_avatars a WHERE a.user_id=u.id),u.avatar_key),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_profile_stats,u.show_recent_scores,coalesce((SELECT updated_at FROM zigcho.user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,coalesce((SELECT updated_at FROM zigcho.team_assets a WHERE a.team_id=t.id AND a.kind='flag'),0)," ++ common.visible_follower_count_sql ++ " FROM zigcho.users u LEFT JOIN zigcho.team_members tm ON tm.user_id=u.id LEFT JOIN zigcho.teams t ON t.id=tm.team_id WHERE u.id=$1 AND u.id!=3 AND NOT u.restricted";
+    const user_sql = "SELECT u.id,u.name,CASE WHEN $2::boolean OR u.show_country THEN u.country ELSE 'XX' END,u.privileges,u.created_at,u.bio,u.preferred_mode,u.profile_source,coalesce((SELECT updated_at FROM zigcho.user_avatars a WHERE a.user_id=u.id),u.avatar_key),u.profile_title,u.profile_pronouns,u.profile_location,u.profile_website,u.profile_accent,u.show_profile_stats,u.show_recent_scores,coalesce((SELECT updated_at FROM zigcho.user_banners b WHERE b.user_id=u.id),0),tm.team_id,t.name,t.short_name,coalesce((SELECT updated_at FROM zigcho.team_assets a WHERE a.team_id=t.id AND a.kind='flag'),0)," ++ common.visible_follower_count_sql ++ ",u.restricted FROM zigcho.users u LEFT JOIN zigcho.team_members tm ON tm.user_id=u.id LEFT JOIN zigcho.teams t ON t.id=tm.team_id WHERE u.id=$1 AND u.id!=3 AND (NOT u.restricted OR $2::boolean)";
     var user = try postgres.queryParams(allocator, lease.conn, user_sql, &.{ id, if (owner_view) "true" else "false" });
     defer user.deinit();
     if (user.rows() == 0) return null;
@@ -243,18 +243,18 @@ pub fn siteProfilePageForViewer(self: anytype, allocator: std.mem.Allocator, use
         "ranked AS (SELECT *,row_number() OVER(PARTITION BY user_id ORDER BY pp DESC,beatmap_id ASC,score_id ASC)-1 performance_index FROM map_scores WHERE map_place=1)," ++
         "performance AS (SELECT user_id,round(sum(pp*power(0.95,performance_index))+416.6667*(1-power(0.9994,count(*)::double precision))) pp,sum(accuracy*power(0.95,performance_index))/(20*(1-power(0.95,count(*)::double precision))) accuracy FROM ranked GROUP BY user_id)," ++
         "activity AS (SELECT user_id,count(*) plays,coalesce(sum(total_score),0) total_score,coalesce(sum(play_time),0) play_time,coalesce((SELECT sum(r.total_score) FROM ranked r WHERE r.user_id=source_scores.user_id),0) ranked_score,coalesce(max(CASE WHEN passed AND status>=3 THEN max_combo ELSE 0 END),0) max_combo FROM source_scores GROUP BY user_id)," ++
-        "players AS (SELECT a.user_id,a.ranked_score,a.total_score,coalesce(p.pp,0) pp,a.plays,a.play_time,coalesce(p.accuracy,0) accuracy,a.max_combo FROM activity a JOIN zigcho.users u ON u.id=a.user_id LEFT JOIN performance p ON p.user_id=a.user_id WHERE u.id!=3 AND NOT u.restricted)," ++
-        "ordered AS (SELECT *,row_number() OVER(ORDER BY pp DESC,user_id ASC) global_rank FROM players) SELECT ranked_score,total_score,pp,plays,play_time,accuracy,max_combo,global_rank FROM ordered WHERE user_id=$1";
+        "players AS (SELECT u.country,a.user_id,a.ranked_score,a.total_score,coalesce(p.pp,0) pp,a.plays,a.play_time,coalesce(p.accuracy,0) accuracy,a.max_combo FROM activity a JOIN zigcho.users u ON u.id=a.user_id LEFT JOIN performance p ON p.user_id=a.user_id WHERE u.id!=3 AND (NOT u.restricted OR u.id=$1))," ++
+        "ordered AS (SELECT *,row_number() OVER(ORDER BY pp DESC,user_id ASC) global_rank,row_number() OVER(PARTITION BY country ORDER BY pp DESC,user_id ASC) country_rank FROM players) SELECT ranked_score,total_score,pp,plays,play_time,accuracy,max_combo,global_rank,country_rank FROM ordered WHERE user_id=$1";
     const lazer_stats_sql =
         "WITH source_scores AS (SELECT s.user_id,s.id score_id,coalesce(s.legacy_total_score,s.total_score) total_score,s.pp,s.accuracy,s.max_combo,s.passed,greatest(b.total_length,0) play_time,b.status,s.beatmap_id FROM zigcho.lazer_scores s JOIN zigcho.beatmaps b ON b.id=s.beatmap_id WHERE s.ruleset_id=$2 AND s.rank_namespace=$3)," ++
         "map_scores AS (SELECT *,row_number() OVER(PARTITION BY user_id,beatmap_id ORDER BY pp DESC,score_id ASC) map_place FROM source_scores WHERE passed AND status IN(3,4))," ++
         "ranked AS (SELECT *,row_number() OVER(PARTITION BY user_id ORDER BY pp DESC,beatmap_id ASC,score_id ASC)-1 performance_index FROM map_scores WHERE map_place=1)," ++
         "performance AS (SELECT user_id,round(sum(pp*power(0.95,performance_index))+416.6667*(1-power(0.9994,count(*)::double precision))) pp,sum(accuracy*power(0.95,performance_index))/(20*(1-power(0.95,count(*)::double precision))) accuracy FROM ranked GROUP BY user_id)," ++
         "activity AS (SELECT user_id,count(*) plays,coalesce(sum(total_score),0) total_score,coalesce(sum(play_time),0) play_time,coalesce((SELECT sum(r.total_score) FROM ranked r WHERE r.user_id=source_scores.user_id),0) ranked_score,coalesce(max(CASE WHEN passed AND status>=3 THEN max_combo ELSE 0 END),0) max_combo FROM source_scores GROUP BY user_id)," ++
-        "players AS (SELECT a.user_id,a.ranked_score,a.total_score,coalesce(p.pp,0) pp,a.plays,a.play_time,coalesce(p.accuracy,0) accuracy,a.max_combo FROM activity a JOIN zigcho.users u ON u.id=a.user_id LEFT JOIN performance p ON p.user_id=a.user_id WHERE u.id!=3 AND NOT u.restricted)," ++
-        "ordered AS (SELECT *,row_number() OVER(ORDER BY pp DESC,user_id ASC) global_rank FROM players) SELECT ranked_score,total_score,pp,plays,play_time,accuracy,max_combo,global_rank FROM ordered WHERE user_id=$1";
+        "players AS (SELECT u.country,a.user_id,a.ranked_score,a.total_score,coalesce(p.pp,0) pp,a.plays,a.play_time,coalesce(p.accuracy,0) accuracy,a.max_combo FROM activity a JOIN zigcho.users u ON u.id=a.user_id LEFT JOIN performance p ON p.user_id=a.user_id WHERE u.id!=3 AND (NOT u.restricted OR u.id=$1))," ++
+        "ordered AS (SELECT *,row_number() OVER(ORDER BY pp DESC,user_id ASC) global_rank,row_number() OVER(PARTITION BY country ORDER BY pp DESC,user_id ASC) country_rank FROM players) SELECT ranked_score,total_score,pp,plays,play_time,accuracy,max_combo,global_rank,country_rank FROM ordered WHERE user_id=$1";
     var selected_stats = switch (source) {
-        .all => try postgres.queryParams(allocator, lease.conn, "SELECT s.ranked_score,s.total_score,s.pp,s.plays,s.play_time,s.accuracy,s.max_combo,(SELECT count(*)+1 FROM zigcho.stats r JOIN zigcho.users ru ON ru.id=r.user_id WHERE r.mode=s.mode AND r.plays>0 AND ru.id!=3 AND NOT ru.restricted AND (r.pp>s.pp OR (r.pp=s.pp AND r.user_id<s.user_id))) FROM zigcho.stats s WHERE s.user_id=$1 AND s.mode=$2 AND s.plays>0", &.{ id, stats_mode_text }),
+        .all => try postgres.queryParams(allocator, lease.conn, "SELECT s.ranked_score,s.total_score,s.pp,s.plays,s.play_time,s.accuracy,s.max_combo,(SELECT count(*)+1 FROM zigcho.stats r JOIN zigcho.users ru ON ru.id=r.user_id WHERE r.mode=s.mode AND r.plays>0 AND ru.id!=3 AND NOT ru.restricted AND (r.pp>s.pp OR (r.pp=s.pp AND r.user_id<s.user_id))),(SELECT count(*)+1 FROM zigcho.stats r JOIN zigcho.users ru ON ru.id=r.user_id WHERE r.mode=s.mode AND r.plays>0 AND ru.id!=3 AND NOT ru.restricted AND ru.country=(SELECT country FROM zigcho.users WHERE id=s.user_id) AND (r.pp>s.pp OR (r.pp=s.pp AND r.user_id<s.user_id))) FROM zigcho.stats s WHERE s.user_id=$1 AND s.mode=$2 AND s.plays>0", &.{ id, stats_mode_text }),
         .stable, .scorev2 => try postgres.queryParams(allocator, lease.conn, stable_stats_sql, &.{ id, score_mode_text, namespace }),
         .lazer => try postgres.queryParams(allocator, lease.conn, lazer_stats_sql, &.{ id, score_mode_text, namespace }),
     };
@@ -298,13 +298,14 @@ pub fn siteProfilePageForViewer(self: anytype, allocator: std.mem.Allocator, use
     defer recent.deinit();
     var firsts = try scorePageQuery(allocator, lease.conn, first_sql, id, score_mode_text, namespace, offset);
     defer firsts.deinit();
+    const restricted = try user.boolean(0, 22);
     var output: std.Io.Writer.Allocating = .init(allocator);
     errdefer output.deinit();
     try output.writer.print("{{\"id\":{d},\"name\":", .{try user.int(i32, 0, 0)});
     try common.jsonString(&output.writer, user.value(0, 1));
     try output.writer.writeAll(",\"country\":");
     try common.jsonString(&output.writer, user.value(0, 2));
-    try output.writer.print(",\"privileges\":{d},\"created_at\":{d},\"bio\":", .{ try user.int(u32, 0, 3), try user.int(i64, 0, 4) });
+    try output.writer.print(",\"privileges\":{d},\"restricted\":{},\"created_at\":{d},\"bio\":", .{ try user.int(u32, 0, 3), restricted, try user.int(i64, 0, 4) });
     try common.jsonString(&output.writer, user.value(0, 5));
     try output.writer.writeAll(",\"profile_source\":");
     try common.jsonString(&output.writer, user.value(0, 7));
@@ -343,11 +344,11 @@ pub fn siteProfilePageForViewer(self: anytype, allocator: std.mem.Allocator, use
     } else {
         const total_score = @max(@as(i64, 0), try selected_stats.int(i64, 0, 1));
         const level = domain.levelFromTotalScore(total_score);
-        const global_rank = try selected_stats.int(i32, 0, 7);
+        const global_rank = if (restricted) 0 else try selected_stats.int(i32, 0, 7);
         const selected_pp = try selected_stats.int(i32, 0, 2);
         const replay_views = try pg_social.replayViewCountWithConnection(self, lease.conn, user_id, source, stats_mode);
         const stats_history = try pg_score_maintenance.readStatsHistoryWithConnection(self, lease.conn, user_id, source, stats_mode);
-        try output.writer.print("{{\"ranked_score\":{d},\"total_score\":{d},\"pp\":{d},\"plays\":{d},\"play_time\":{d},\"accuracy\":{d},\"max_combo\":{d},\"global_rank\":{d},\"level_current\":{d},\"level_progress\":{d},\"replay_views\":{d},", .{ try selected_stats.int(i64, 0, 0), total_score, selected_pp, try selected_stats.int(i32, 0, 3), try selected_stats.int(i32, 0, 4), try selected_stats.float(f64, 0, 5), try selected_stats.int(i32, 0, 6), global_rank, level.current, level.progress, replay_views });
+        try output.writer.print("{{\"ranked_score\":{d},\"total_score\":{d},\"pp\":{d},\"plays\":{d},\"play_time\":{d},\"accuracy\":{d},\"max_combo\":{d},\"global_rank\":{d},\"country_rank\":{d},\"level_current\":{d},\"level_progress\":{d},\"replay_views\":{d},", .{ try selected_stats.int(i64, 0, 0), total_score, selected_pp, try selected_stats.int(i32, 0, 3), try selected_stats.int(i32, 0, 4), try selected_stats.float(f64, 0, 5), try selected_stats.int(i32, 0, 6), global_rank, if (restricted or std.mem.eql(u8, user.value(0, 2), "XX")) 0 else try selected_stats.int(i32, 0, 8), level.current, level.progress, replay_views });
         try user_json.writeSiteStatsHistory(&output.writer, stats_history);
         try output.writer.writeByte('}');
     }
@@ -355,7 +356,7 @@ pub fn siteProfilePageForViewer(self: anytype, allocator: std.mem.Allocator, use
     for (0..if (show_profile_stats) stats.rows() else 0) |row| {
         if (row != 0) try output.writer.writeByte(',');
         const raw_mode = try stats.int(u8, row, 0);
-        try output.writer.print("{{\"mode\":{d},\"ranked_score\":{d},\"total_score\":{d},\"pp\":{d},\"plays\":{d},\"play_time\":{d},\"total_hits\":{d},\"accuracy\":{d},\"max_combo\":{d},\"global_rank\":{d},\"replay_views\":{d}}}", .{ raw_mode, try stats.int(i64, row, 1), try stats.int(i64, row, 2), try stats.int(i32, row, 3), try stats.int(i32, row, 4), try stats.int(i32, row, 5), try stats.int(i64, row, 6), try stats.float(f64, row, 7), try stats.int(i32, row, 8), try stats.int(i32, row, 9), try pg_social.replayViewCountWithConnection(self, lease.conn, user_id, .all, raw_mode) });
+        try output.writer.print("{{\"mode\":{d},\"ranked_score\":{d},\"total_score\":{d},\"pp\":{d},\"plays\":{d},\"play_time\":{d},\"total_hits\":{d},\"accuracy\":{d},\"max_combo\":{d},\"global_rank\":{d},\"replay_views\":{d}}}", .{ raw_mode, try stats.int(i64, row, 1), try stats.int(i64, row, 2), try stats.int(i32, row, 3), try stats.int(i32, row, 4), try stats.int(i32, row, 5), try stats.int(i64, row, 6), try stats.float(f64, row, 7), try stats.int(i32, row, 8), if (restricted) @as(i32, 0) else try stats.int(i32, row, 9), try pg_social.replayViewCountWithConnection(self, lease.conn, user_id, .all, raw_mode) });
     }
     try output.writer.writeAll("],\"pinned_scores\":");
     if (show_profile_stats) try writeSiteScores(&output.writer, &pinned, false) else try output.writer.writeAll("[]");
@@ -515,16 +516,16 @@ pub fn sourceStatsForUser(self: anytype, user_id: i32, mode: u8, source: domain.
         "ranked AS (SELECT *,row_number() OVER(PARTITION BY user_id ORDER BY pp DESC,beatmap_id ASC,score_id ASC)-1 performance_index FROM map_scores WHERE map_place=1)," ++
         "performance AS (SELECT user_id,round(sum(pp*power(0.95,performance_index))+416.6667*(1-power(0.9994,count(*)::double precision))) pp,sum(accuracy*power(0.95,performance_index))/(20*(1-power(0.95,count(*)::double precision))) accuracy FROM ranked GROUP BY user_id)," ++
         "activity AS (SELECT user_id,count(*) plays,coalesce(sum(total_score),0) total_score,coalesce(sum(play_time),0) play_time,coalesce((SELECT sum(r.total_score) FROM ranked r WHERE r.user_id=source_scores.user_id),0) ranked_score,coalesce(max(CASE WHEN passed AND status>=3 THEN max_combo ELSE 0 END),0) max_combo FROM source_scores GROUP BY user_id)," ++
-        "players AS (SELECT a.user_id,a.ranked_score,a.total_score,coalesce(p.pp,0) pp,a.plays,a.play_time,coalesce(p.accuracy,0) accuracy,a.max_combo FROM activity a JOIN zigcho.users u ON u.id=a.user_id LEFT JOIN performance p ON p.user_id=a.user_id WHERE u.id!=3 AND NOT u.restricted)," ++
-        "ordered AS (SELECT *,row_number() OVER(ORDER BY pp DESC,user_id ASC) global_rank FROM players) SELECT ranked_score,total_score,pp,plays,play_time,accuracy,max_combo,global_rank FROM ordered WHERE user_id=$1";
+        "players AS (SELECT u.country,a.user_id,a.ranked_score,a.total_score,coalesce(p.pp,0) pp,a.plays,a.play_time,coalesce(p.accuracy,0) accuracy,a.max_combo FROM activity a JOIN zigcho.users u ON u.id=a.user_id LEFT JOIN performance p ON p.user_id=a.user_id WHERE u.id!=3 AND NOT u.restricted)," ++
+        "ordered AS (SELECT *,row_number() OVER(ORDER BY pp DESC,user_id ASC) global_rank,row_number() OVER(PARTITION BY country ORDER BY pp DESC,user_id ASC) country_rank FROM players) SELECT ranked_score,total_score,pp,plays,play_time,accuracy,max_combo,global_rank,country_rank FROM ordered WHERE user_id=$1";
     const lazer_sql =
         "WITH source_scores AS (SELECT s.user_id,s.id score_id,coalesce(s.legacy_total_score,s.total_score) total_score,s.pp,s.accuracy,s.max_combo,s.passed,greatest(b.total_length,0) play_time,b.status,s.beatmap_id FROM zigcho.lazer_scores s JOIN zigcho.beatmaps b ON b.id=s.beatmap_id WHERE s.ruleset_id=$2 AND s.rank_namespace='vanilla')," ++
         "map_scores AS (SELECT *,row_number() OVER(PARTITION BY user_id,beatmap_id ORDER BY pp DESC,score_id ASC) map_place FROM source_scores WHERE passed AND status IN(3,4))," ++
         "ranked AS (SELECT *,row_number() OVER(PARTITION BY user_id ORDER BY pp DESC,beatmap_id ASC,score_id ASC)-1 performance_index FROM map_scores WHERE map_place=1)," ++
         "performance AS (SELECT user_id,round(sum(pp*power(0.95,performance_index))+416.6667*(1-power(0.9994,count(*)::double precision))) pp,sum(accuracy*power(0.95,performance_index))/(20*(1-power(0.95,count(*)::double precision))) accuracy FROM ranked GROUP BY user_id)," ++
         "activity AS (SELECT user_id,count(*) plays,coalesce(sum(total_score),0) total_score,coalesce(sum(play_time),0) play_time,coalesce((SELECT sum(r.total_score) FROM ranked r WHERE r.user_id=source_scores.user_id),0) ranked_score,coalesce(max(CASE WHEN passed AND status>=3 THEN max_combo ELSE 0 END),0) max_combo FROM source_scores GROUP BY user_id)," ++
-        "players AS (SELECT a.user_id,a.ranked_score,a.total_score,coalesce(p.pp,0) pp,a.plays,a.play_time,coalesce(p.accuracy,0) accuracy,a.max_combo FROM activity a JOIN zigcho.users u ON u.id=a.user_id LEFT JOIN performance p ON p.user_id=a.user_id WHERE u.id!=3 AND NOT u.restricted)," ++
-        "ordered AS (SELECT *,row_number() OVER(ORDER BY pp DESC,user_id ASC) global_rank FROM players) SELECT ranked_score,total_score,pp,plays,play_time,accuracy,max_combo,global_rank FROM ordered WHERE user_id=$1";
+        "players AS (SELECT u.country,a.user_id,a.ranked_score,a.total_score,coalesce(p.pp,0) pp,a.plays,a.play_time,coalesce(p.accuracy,0) accuracy,a.max_combo FROM activity a JOIN zigcho.users u ON u.id=a.user_id LEFT JOIN performance p ON p.user_id=a.user_id WHERE u.id!=3 AND NOT u.restricted)," ++
+        "ordered AS (SELECT *,row_number() OVER(ORDER BY pp DESC,user_id ASC) global_rank,row_number() OVER(PARTITION BY country ORDER BY pp DESC,user_id ASC) country_rank FROM players) SELECT ranked_score,total_score,pp,plays,play_time,accuracy,max_combo,global_rank,country_rank FROM ordered WHERE user_id=$1";
     var lease = self.pool.acquire();
     defer lease.release();
     var result = try postgres.queryParams(self.allocator, lease.conn, if (source == .stable) stable_sql else lazer_sql, &.{ id, mode_text });

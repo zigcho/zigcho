@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 62,
+      "version": "2026.910.3",
+      "display_version": "profiles have the rest of the account now",
+      "created_at": "2026-09-10T11:30:03Z",
+      "updates": [
+        {
+          "name": "2026-09-10-profile-workspace.md",
+          "created_at": "2026-09-10T11:30:03Z",
+          "commit": "",
+          "sha256": "f3691324bad61c30ba85ba9050feb22054d79825fb7c923ab26185a2bacbe820"
+        }
+      ]
+    },
+    {
       "id": 61,
       "version": "2026.910.2",
       "display_version": "25 plays at a time",
