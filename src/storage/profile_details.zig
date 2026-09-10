@@ -73,7 +73,8 @@ fn query(store: anytype, allocator: std.mem.Allocator, comptime sql: [:0]const u
             try rows.append(a, fields);
         }
     }
-    return .{ .arena = arena, .items = try rows.toOwnedSlice(a) };
+    const items = try rows.toOwnedSlice(a);
+    return .{ .arena = arena, .items = items };
 }
 
 pub const Filter = struct {
@@ -108,9 +109,9 @@ pub fn monthly(store: anytype, allocator: std.mem.Allocator, user_id: i32, filte
     const replay_month = if (pg) "to_char(to_timestamp(viewed_at) AT TIME ZONE 'UTC','YYYY-MM-01')" else "strftime('%Y-%m-01',viewed_at,'unixepoch')";
     if (replays) params[1] = try std.fmt.bufPrint(&buffers[1], "{d}", .{filter.mode});
     var rows = if (replays)
-        try query(store, allocator, "SELECT " ++ replay_month ++ " month,count(*) FROM zigcho.score_replay_views WHERE owner_id=$1 AND mode=$2 AND rank_namespace=$4 AND ($3='all' OR ($3='scorev2' AND source='stable') OR source=$3) GROUP BY 1 ORDER BY 1 DESC LIMIT 24", &params)
+        try query(store, allocator, "SELECT " ++ replay_month ++ " AS period,count(*) FROM zigcho.score_replay_views WHERE owner_id=$1 AND mode=$2 AND rank_namespace=$4 AND ($3='all' OR ($3='scorev2' AND source='stable') OR source=$3) GROUP BY 1 ORDER BY 1 DESC LIMIT 24", &params)
     else
-        try query(store, allocator, plays ++ "SELECT " ++ month ++ " month,count(*) FROM plays GROUP BY 1 ORDER BY 1 DESC LIMIT 24", &params);
+        try query(store, allocator, plays ++ "SELECT " ++ month ++ " AS period,count(*) FROM plays GROUP BY 1 ORDER BY 1 DESC LIMIT 24", &params);
     defer rows.deinit();
     var output: std.Io.Writer.Allocating = .init(allocator);
     defer output.deinit();

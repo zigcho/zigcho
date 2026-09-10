@@ -13,3 +13,5 @@ restricted doesn't mean locked out of your own profile anymore. you can still se
 staff controls are on profiles now: notes, kicks, silences, restrictions, session revocation and avatar / banner resets, depending on your role. developers also get roles and premium. staff sign-in, reasons, audit history and protected-account checks still apply.
 
 no pp changes in this build. the custom boost is still relax only.
+
+the release check also stopped timing out on an old history query we no longer use. it still runs the current query and checks every resulting row against an independent expected result.
