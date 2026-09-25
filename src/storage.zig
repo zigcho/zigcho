@@ -156,6 +156,8 @@ pub const Store = struct {
 
     pub const hasAvatarColumn = @import("storage/sqlite/schema.zig").hasAvatarColumn;
 
+    pub const hasProfileSetupColumn = @import("storage/sqlite/schema.zig").hasProfileSetupColumn;
+
     pub const hasBeatmapStatusFrozenColumn = @import("storage/sqlite/schema.zig").hasBeatmapStatusFrozenColumn;
 
     pub const hasBeatmapArchiveAccessColumn = @import("storage/sqlite/schema.zig").hasBeatmapArchiveAccessColumn;
