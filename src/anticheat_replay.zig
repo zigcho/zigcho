@@ -72,7 +72,7 @@ pub fn validatePayload(allocator: std.mem.Allocator, replay: []const u8, ruleset
     allocator.free(frames);
 }
 
-fn decompress(allocator: std.mem.Allocator, compressed: []const u8) ![]u8 {
+pub fn decompress(allocator: std.mem.Allocator, compressed: []const u8) ![]u8 {
     var input = std.Io.Reader.fixed(compressed);
     const decode_buffer = try allocator.alloc(u8, 4096);
     var decoder = std.compress.lzma.Decompress.initOptions(&input, allocator, decode_buffer, .{}, max_lzma_memory) catch |err| {
@@ -160,7 +160,7 @@ fn parseFramesWithLimit(allocator: std.mem.Allocator, decoded: []const u8, max_x
     return frames.toOwnedSlice(allocator);
 }
 
-fn parseReplayDelta(value: []const u8) !i64 {
+pub fn parseReplayDelta(value: []const u8) !i64 {
     return std.fmt.parseInt(i64, value, 10) catch {
         const parsed = std.fmt.parseFloat(f32, value) catch return error.InvalidReplay;
         if (!std.math.isFinite(parsed)) return error.InvalidReplay;

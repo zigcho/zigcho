@@ -53,6 +53,7 @@ pub const anticheat_abi = @import("../anticheat_abi.zig");
 pub const anticheat_evidence = @import("../anticheat_evidence.zig");
 pub const anticheat_plugin = @import("../anticheat_plugin.zig");
 pub const anticheat_replay = @import("../anticheat_replay.zig");
+pub const site_replay_preview = @import("../site_replay_preview.zig");
 pub const player_routes = @import("../player_routes.zig");
 pub const http_boundary = @import("../http_boundary.zig");
 pub const stable_score_auth = @import("../stable_score_auth.zig");

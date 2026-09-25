@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 64,
+      "version": "2026.925.0",
+      "display_version": "watch replays from a profile",
+      "created_at": "2026-09-25T07:56:52Z",
+      "updates": [
+        {
+          "name": "2026-09-25-web-replay-preview.md",
+          "created_at": "2026-09-25T07:56:52Z",
+          "commit": "",
+          "sha256": "8ff0a154682359dc411987a473aa7c1e5648aedb6b6630c6d73b05cca1026687"
+        }
+      ]
+    },
+    {
       "id": 63,
       "version": "2026.910.4",
       "display_version": "the website needed this",
