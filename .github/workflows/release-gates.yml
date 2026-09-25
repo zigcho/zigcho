@@ -435,11 +435,11 @@ jobs:
           openssl req -x509 -newkey rsa:2048 -nodes -keyout "$cert_dir/private.key" -out "$cert_dir/public.crt" -days 1 -subj '/CN=localhost' -addext 'subjectAltName=IP:127.0.0.1,DNS:localhost' 2>/dev/null
           sudo cp "$cert_dir/public.crt" /usr/local/share/ca-certificates/zigcho-backup-fixture.crt
           sudo update-ca-certificates >/dev/null
-          docker run -d --name zigcho-backup-objects --network host -v "$cert_dir:/root/.minio/certs:ro" -e MINIO_ROOT_USER=backup-fixture-access -e MINIO_ROOT_PASSWORD=backup-fixture-secret quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z server /data --address 127.0.0.1:19020 --console-address 127.0.0.1:19021
+          docker run -d --name zigcho-backup-objects --network host -v "$cert_dir:/certs:ro" ghcr.io/getmoto/motoserver:5.2.2@sha256:0349ef6ecb9cd041293026accda0ea71bfa09925dffae3d76d120d15ecc76971 -p 19020 -c /certs/public.crt -k /certs/private.key
           proxy_pid=
           trap 'if [ -n "$proxy_pid" ]; then kill "$proxy_pid" >/dev/null 2>&1 || true; fi; docker rm -f zigcho-backup-objects >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
-            if curl --fail --silent https://127.0.0.1:19020/minio/health/live; then break; fi
+            if curl --fail --silent https://127.0.0.1:19020/; then break; fi
             sleep 1
           done
           aws --endpoint-url https://localhost:19020 --ca-bundle "$cert_dir/public.crt" s3api create-bucket --bucket zigcho-backup-fixture
@@ -452,7 +452,7 @@ jobs:
           tinyproxy -d -c tools/fixtures/storage-proxy.conf >"$runtime/proxy.log" 2>&1 &
           proxy_pid=$!
           for attempt in $(seq 1 10); do
-            if curl --fail --silent --noproxy '' --proxy http://127.0.0.1:19022 https://localhost:19020/minio/health/live; then break; fi
+            if curl --fail --silent --noproxy '' --proxy http://127.0.0.1:19022 https://localhost:19020/; then break; fi
             sleep 1
           done
           printf '\nobject_storage_proxy_port=19022\n' >>"$runtime/config.ini"
