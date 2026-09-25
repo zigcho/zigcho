@@ -149,7 +149,12 @@ pub fn migrate(self: *Store) !void {
     if (version < 44) try self.exec(database_sql.sqliteMigration(44));
     if (version < 45) try self.exec(database_sql.sqliteMigration(45));
     if (version < 46) try self.exec(database_sql.sqliteMigration(46));
-    if (version < 47) try self.exec(database_sql.sqliteMigration(47));
+    if (version < 47) {
+        if (try self.hasProfileSetupColumn())
+            try self.exec("PRAGMA user_version=47")
+        else
+            try self.exec(database_sql.sqliteMigration(47));
+    }
     try self.backfillLazerClassicScores();
     try self.exec("DELETE FROM user_stats_history WHERE day<((unixepoch()/86400)-89)*86400");
     try self.exec(
@@ -379,6 +384,16 @@ pub fn hasAvatarColumn(self: *Store) !bool {
     defer _ = c.sqlite3_finalize(stmt);
     while (c.sqlite3_step(stmt) == c.SQLITE_ROW) {
         if (std.mem.eql(u8, std.mem.span(c.sqlite3_column_text(stmt, 1)), "avatar_key")) return true;
+    }
+    return false;
+}
+
+pub fn hasProfileSetupColumn(self: *Store) !bool {
+    var stmt: ?*c.sqlite3_stmt = null;
+    if (c.sqlite3_prepare_v2(self.db, "PRAGMA table_info(users)", -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    defer _ = c.sqlite3_finalize(stmt);
+    while (c.sqlite3_step(stmt) == c.SQLITE_ROW) {
+        if (std.mem.eql(u8, std.mem.span(c.sqlite3_column_text(stmt, 1)), "profile_setup")) return true;
     }
     return false;
 }

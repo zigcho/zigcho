@@ -2,7 +2,7 @@ const std = @import("std");
 const domain = @import("domain.zig");
 const r2 = @import("r2.zig");
 pub const is_postgres = false;
-pub const schema_version: u16 = 46;
+pub const schema_version: u16 = 47;
 
 pub const visible_follower_count_sql = "CASE WHEN u.restricted=0 AND u.id!=3 THEN (SELECT count(*) FROM friends relation JOIN users follower ON follower.id=relation.user_id WHERE relation.friend_id=u.id AND relation.user_id!=u.id AND follower.restricted=0) ELSE 0 END";
 
