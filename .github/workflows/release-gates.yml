@@ -435,7 +435,7 @@ jobs:
           openssl req -x509 -newkey rsa:2048 -nodes -keyout "$cert_dir/private.key" -out "$cert_dir/public.crt" -days 1 -subj '/CN=localhost' -addext 'subjectAltName=IP:127.0.0.1,DNS:localhost' 2>/dev/null
           sudo cp "$cert_dir/public.crt" /usr/local/share/ca-certificates/zigcho-backup-fixture.crt
           sudo update-ca-certificates >/dev/null
-          docker run -d --name zigcho-backup-objects --network host -v "$cert_dir:/root/.minio/certs:ro" -e MINIO_ROOT_USER=backup-fixture-access -e MINIO_ROOT_PASSWORD=backup-fixture-secret minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e server /data --address 127.0.0.1:19020 --console-address 127.0.0.1:19021
+          docker run -d --name zigcho-backup-objects --network host -v "$cert_dir:/root/.minio/certs:ro" -e MINIO_ROOT_USER=backup-fixture-access -e MINIO_ROOT_PASSWORD=backup-fixture-secret quay.io/minio/minio:RELEASE.2025-09-06T17-38-46Z server /data --address 127.0.0.1:19020 --console-address 127.0.0.1:19021
           proxy_pid=
           trap 'if [ -n "$proxy_pid" ]; then kill "$proxy_pid" >/dev/null 2>&1 || true; fi; docker rm -f zigcho-backup-objects >/dev/null 2>&1 || true' EXIT
           for attempt in $(seq 1 30); do
