@@ -1986,6 +1986,8 @@ test "website profile settings and private avatar metadata stay account scoped" 
     try store.migrate();
     const user_id = try store.register("site user", "site-user@example.invalid", "00000000000000000000000000000000");
     try store.updateCountry(user_id, .{ 'A', 'U' });
+    const login_country = try store.countryOnLogin(user_id, .{ 'G', 'B' });
+    try std.testing.expectEqualSlices(u8, "AU", &login_country);
     const map_contents = @embedFile("testdata/synthetic-standard.osu");
     const map_metadata = try beatmap.parse(map_contents);
     const map_hash = beatmap.md5(map_contents);
