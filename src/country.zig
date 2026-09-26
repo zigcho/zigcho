@@ -28,10 +28,22 @@ pub fn numeric(value: []const u8) u8 {
     return 244;
 }
 
+pub fn selectable(value: []const u8) ?[2]u8 {
+    const code = normalized(value) orelse return null;
+    return if (numeric(&code) == 244) null else code;
+}
+
 test "stable country numbers match bancho" {
     try std.testing.expectEqual(@as(u8, 16), numeric("AU"));
     try std.testing.expectEqual(@as(u8, 77), numeric("gb"));
     try std.testing.expectEqual(@as(u8, 225), numeric("US"));
     try std.testing.expectEqual(@as(u8, 244), numeric("XX"));
     try std.testing.expectEqual(@as(u8, 244), numeric("?"));
+}
+
+test "only known flags can be selected" {
+    const au = selectable("au") orelse unreachable;
+    try std.testing.expectEqualSlices(u8, "AU", &au);
+    try std.testing.expect(selectable("XX") == null);
+    try std.testing.expect(selectable("ZZ") == null);
 }

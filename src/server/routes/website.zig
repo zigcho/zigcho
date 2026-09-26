@@ -175,10 +175,11 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             const mutex = self.gameSessionMutex(user_id);
             mutex.lockUncancelable(self.store.io);
             defer mutex.unlock(self.store.io);
-            const user = (try self.store.authenticate(self.allocator, name, &password_md5)) orelse return respond(req, .unauthorized, "application/json", "{\"error\":\"invalid credentials\"}", &no_store);
+            var user = (try self.store.authenticate(self.allocator, name, &password_md5)) orelse return respond(req, .unauthorized, "application/json", "{\"error\":\"invalid credentials\"}", &no_store);
             defer freeUser(self.allocator, user);
             if (user.id != user_id) return respond(req, .unauthorized, "application/json", "{\"error\":\"invalid credentials\"}", &no_store);
             if (user.id == 3) return respond(req, .forbidden, "application/json", "{\"error\":\"account login unavailable\"}", &no_store);
+            user.country = try self.store.countryOnLogin(user.id, if (ctx.country_owned) |value| country.selectable(value) else null);
             const token = try self.store.issueToken(user.id, web_auth.player_scope, web_auth.player_lifetime_seconds);
             const csrf = web_auth.csrfToken(&token);
             const json = try web_auth.sessionJson(self.allocator, user, csrf);
@@ -371,7 +372,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         return respond(req, .created, "application/json", written.json, &no_store);
     }
     const account_pin_path = parsePinPath(path);
-    if (std.mem.eql(u8, path, "/api/v1/account") or std.mem.eql(u8, path, "/api/v1/account/avatar") or std.mem.eql(u8, path, "/api/v1/account/banner") or std.mem.eql(u8, path, "/api/v1/account/email") or std.mem.eql(u8, path, "/api/v1/account/password") or std.mem.eql(u8, path, "/api/v1/account/username") or account_pin_path != null) {
+    if (std.mem.eql(u8, path, "/api/v1/account") or std.mem.eql(u8, path, "/api/v1/account/avatar") or std.mem.eql(u8, path, "/api/v1/account/banner") or std.mem.eql(u8, path, "/api/v1/account/country") or std.mem.eql(u8, path, "/api/v1/account/email") or std.mem.eql(u8, path, "/api/v1/account/password") or std.mem.eql(u8, path, "/api/v1/account/username") or account_pin_path != null) {
         const no_store = [_]std.http.Header{
             .{ .name = "cache-control", .value = "no-store" },
             .{ .name = "pragma", .value = "no-cache" },
@@ -503,6 +504,22 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
                 return respond(req, .ok, "application/json", json, &no_store);
             }
             return respond(req, .method_not_allowed, "application/json", "{\"error\":\"method not allowed\"}", &no_store);
+        }
+        if (std.mem.eql(u8, path, "/api/v1/account/country")) {
+            if (req.head.method != .POST) return respond(req, .method_not_allowed, "application/json", "{\"error\":\"method not allowed\"}", &no_store);
+            if (!web_auth.sameOrigin(origin_owned, host_owned) or !web_auth.csrfMatches(token, csrf_owned)) return respond(req, .forbidden, "application/json", "{\"error\":\"invalid request\"}", &no_store);
+            if (user.privileges & account_roles.Role.premium.definition().bit == 0) return respond(req, .forbidden, "application/json", "{\"error\":\"premium required\"}", &no_store);
+            const requested = (try form_urlencoded.requestField(self.allocator, body, content_type_owned, &.{"country"})) orelse return respond(req, .bad_request, "application/json", "{\"error\":\"country required\"}", &no_store);
+            defer self.allocator.free(requested);
+            const code = country.selectable(requested) orelse return respond(req, .bad_request, "application/json", "{\"error\":\"invalid country flag\"}", &no_store);
+            try self.store.updateCountry(user.id, code);
+            self.lazer_multiplayer.setUserCountryVisibility(user.id, code, user.show_country);
+            bancho.setUserCountryVisibility(self.allocator, &self.store, &self.sessions, user.id, code, user.show_country);
+            var updated = user;
+            updated.country = code;
+            try bancho.refreshLazerCountry(self.allocator, &self.store, &self.sessions, updated);
+            std.log.info("event=website_country_updated user_id={d} country={s}", .{ user.id, &code });
+            return respond(req, .ok, "application/json", "{\"ok\":true}", &no_store);
         }
         if ((req.head.method != .PUT and req.head.method != .DELETE) or !web_auth.sameOrigin(origin_owned, host_owned) or !web_auth.csrfMatches(token, csrf_owned)) return respond(req, if (req.head.method == .PUT or req.head.method == .DELETE) .forbidden else .method_not_allowed, "application/json", if (req.head.method == .PUT or req.head.method == .DELETE) "{\"error\":\"invalid request\"}" else "{\"error\":\"method not allowed\"}", &no_store);
         if (std.mem.eql(u8, path, "/api/v1/account/banner")) {
@@ -775,11 +792,12 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             const mutex = self.gameSessionMutex(user_id);
             mutex.lockUncancelable(self.store.io);
             defer mutex.unlock(self.store.io);
-            const user = (try self.store.authenticate(self.allocator, name, &password_md5)) orelse return respond(req, .unauthorized, "application/json", "{\"error\":\"invalid credentials\"}", &no_store);
+            var user = (try self.store.authenticate(self.allocator, name, &password_md5)) orelse return respond(req, .unauthorized, "application/json", "{\"error\":\"invalid credentials\"}", &no_store);
             defer self.allocator.free(user.name);
             defer self.allocator.free(user.safe_name);
             if (user.id != user_id) return respond(req, .unauthorized, "application/json", "{\"error\":\"invalid credentials\"}", &no_store);
             if (!web_auth.allowed(user)) return respond(req, .forbidden, "application/json", "{\"error\":\"staff access required\"}", &no_store);
+            user.country = try self.store.countryOnLogin(user.id, if (ctx.country_owned) |value| country.selectable(value) else null);
             const token = try self.store.issueToken(user.id, web_auth.scope, web_auth.lifetime_seconds);
             std.log.info("event=staff_session_created user_id={d}", .{user.id});
             const csrf = web_auth.csrfToken(&token);
@@ -1070,12 +1088,26 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
                 if (!validWebText(reason, 3, 1000)) return respond(req, .bad_request, "application/json", "{\"error\":\"invalid reason\"}", &no_store);
                 const target_user = (try self.store.userById(self.allocator, target_id)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &no_store);
                 defer freeUser(self.allocator, target_user);
-                if (!web_auth.canManage(staff_user, target_user)) return respond(req, .forbidden, "application/json", "{\"error\":\"protected player\"}", &no_store);
+                if (!web_auth.canManage(staff_user, target_user) and !(std.mem.eql(u8, action, "set_country") and staff_user.id == target_user.id and web_auth.canAdmin(staff_user))) return respond(req, .forbidden, "application/json", "{\"error\":\"protected player\"}", &no_store);
                 const trimmed_reason = std.mem.trim(u8, reason, " \t\r\n");
                 if (std.mem.eql(u8, action, "revoke_sessions")) {
                     if (!web_auth.canAdmin(staff_user)) return respond(req, .forbidden, "application/json", "{\"error\":\"admin access required\"}", &no_store);
                     _ = try self.disconnectUser(target_id, trimmed_reason, .all);
                     try self.store.recordModerationAction(staff_user.id, target_id, "account.sessions_revoke", trimmed_reason);
+                } else if (std.mem.eql(u8, action, "set_country")) {
+                    if (!web_auth.canAdmin(staff_user)) return respond(req, .forbidden, "application/json", "{\"error\":\"admin access required\"}", &no_store);
+                    const requested = (try form_urlencoded.requestField(self.allocator, body, content_type_owned, &.{"country"})) orelse return respond(req, .bad_request, "application/json", "{\"error\":\"country required\"}", &no_store);
+                    defer self.allocator.free(requested);
+                    const code = country.selectable(requested) orelse return respond(req, .bad_request, "application/json", "{\"error\":\"invalid country flag\"}", &no_store);
+                    try self.store.updateCountry(target_id, code);
+                    self.lazer_multiplayer.setUserCountryVisibility(target_id, code, target_user.show_country);
+                    bancho.setUserCountryVisibility(self.allocator, &self.store, &self.sessions, target_id, code, target_user.show_country);
+                    var updated = target_user;
+                    updated.country = code;
+                    try bancho.refreshLazerCountry(self.allocator, &self.store, &self.sessions, updated);
+                    var detail_buf: [1056]u8 = undefined;
+                    const detail = try std.fmt.bufPrint(&detail_buf, "{s} ({s})", .{ trimmed_reason, &code });
+                    try self.store.recordModerationAction(staff_user.id, target_id, "account.country_set", detail);
                 } else if (std.mem.eql(u8, action, "reset_avatar") or std.mem.eql(u8, action, "reset_banner")) {
                     if (!web_auth.canAdmin(staff_user)) return respond(req, .forbidden, "application/json", "{\"error\":\"admin access required\"}", &no_store);
                     const is_avatar = std.mem.eql(u8, action, "reset_avatar");

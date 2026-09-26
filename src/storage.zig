@@ -464,6 +464,7 @@ pub const Store = struct {
     pub const staffChannelsJson = @import("storage/sqlite/moderation/queries.zig").staffChannelsJson;
 
     pub const updateCountry = @import("storage/sqlite/accounts/profiles.zig").updateCountry;
+    pub const countryOnLogin = @import("storage/sqlite/accounts/profiles.zig").countryOnLogin;
 
     pub const ServerCounts = @import("storage/contracts.zig").ServerCounts;
 

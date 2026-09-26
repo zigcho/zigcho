@@ -733,6 +733,9 @@ pub const Store = struct {
     pub fn updateCountry(self: *Store, user_id: i32, value: [2]u8) !void {
         return pg_accounts.updateCountry(self, user_id, value);
     }
+    pub fn countryOnLogin(self: *Store, user_id: i32, value: ?[2]u8) ![2]u8 {
+        return pg_accounts.countryOnLogin(self, user_id, value);
+    }
     pub fn serverCounts(self: *Store) !ServerCounts {
         return pg_score_stats.serverCounts(self);
     }

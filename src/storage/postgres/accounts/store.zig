@@ -633,8 +633,20 @@ pub fn updateCountry(self: anytype, user_id: i32, value: [2]u8) !void {
     const id = try std.fmt.bufPrint(&id_buf, "{d}", .{user_id});
     var lease = self.pool.acquire();
     defer lease.release();
-    var result = try postgres.queryParams(self.allocator, lease.conn, "UPDATE zigcho.users SET country=$1,last_login=extract(epoch FROM clock_timestamp())::bigint WHERE id=$2", &.{ value[0..], id });
+    var result = try postgres.queryParams(self.allocator, lease.conn, "UPDATE zigcho.users SET country=$1 WHERE id=$2", &.{ value[0..], id });
     result.deinit();
+}
+
+pub fn countryOnLogin(self: anytype, user_id: i32, value: ?[2]u8) ![2]u8 {
+    var id_buf: [24]u8 = undefined;
+    const id = try std.fmt.bufPrint(&id_buf, "{d}", .{user_id});
+    var lease = self.pool.acquire();
+    defer lease.release();
+    var result = try postgres.queryParams(self.allocator, lease.conn, "UPDATE zigcho.users SET country=CASE WHEN country='XX' AND $1::char(2) IS NOT NULL THEN $1::char(2) ELSE country END,last_login=extract(epoch FROM clock_timestamp())::bigint WHERE id=$2 RETURNING country", &.{ if (value) |code| code[0..] else null, id });
+    defer result.deinit();
+    if (result.rows() != 1 or result.value(0, 0).len != 2) return error.DatabaseQueryFailed;
+    const code = result.value(0, 0);
+    return .{ code[0], code[1] };
 }
 
 pub fn issueToken(self: anytype, user_id: i32, scopes: []const u8, lifetime_seconds: i64) ![64]u8 {

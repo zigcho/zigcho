@@ -157,7 +157,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         if (!std.unicode.utf8ValidateSlice(body) or std.mem.indexOfScalar(u8, body, 0) != null)
             return respond(req, .bad_request, "text/plain", "", &.{});
         const geo = if (client_ip_owned) |ip| self.lookupGeo(ip) else GeoResult{ .lon = 0, .lat = 0 };
-        var result = try self.stableLoginAndTakeover(body, if (country_owned) |value| country.normalized(value) else null, geo.lon, geo.lat);
+        var result = try self.stableLoginAndTakeover(body, if (country_owned) |value| country.selectable(value) else null, geo.lon, geo.lat);
         defer result.deinit();
         self.observeStableLogin(result);
         const token_headers = [_]std.http.Header{

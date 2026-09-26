@@ -168,9 +168,10 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         const mutex = self.gameSessionMutex(user_id);
         mutex.lockUncancelable(self.store.io);
         defer mutex.unlock(self.store.io);
-        const user = (try self.store.authenticate(self.allocator, name, &password_md5)) orelse return respond(req, .unauthorized, "application/json", "{\"error\":\"invalid_grant\"}", &.{});
+        var user = (try self.store.authenticate(self.allocator, name, &password_md5)) orelse return respond(req, .unauthorized, "application/json", "{\"error\":\"invalid_grant\"}", &.{});
         defer freeUser(self.allocator, user);
         if (user.id != user_id) return error.LoginUserChanged;
+        user.country = try self.store.countryOnLogin(user.id, if (ctx.country_owned) |value| country.selectable(value) else null);
         const tokens = try self.issueLazerOAuthTokens(user.id, true);
         errdefer rollbackFailedLazerLogin(self.allocator, &self.store, &self.sessions, user.id, tokens);
         try self.takeOverGameSessionsLocked(user.id, "lazer");

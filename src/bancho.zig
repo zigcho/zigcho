@@ -1251,10 +1251,7 @@ fn loginInternal(allocator: std.mem.Allocator, store: *storage.Store, sessions: 
     if (expected_user_id) |expected| if (user.id != expected) {
         return loginFailure(allocator, "no", "Incorrect credentials.");
     };
-    if (login_country) |value| {
-        try store.updateCountry(user.id, value);
-        user.country = value;
-    }
+    user.country = try store.countryOnLogin(user.id, login_country);
     var hardware_evidence = try store.recordClientHardware(user.id, parsed.hardware);
     defer hardware_evidence.deinit();
     if (hardware_evidence.matched_user_ids.len != 0) std.log.warn("stable login exact hardware match observed: user_id={d} matches={any} mode=review", .{ user.id, hardware_evidence.matched_user_ids });
@@ -2881,6 +2878,19 @@ pub fn publishLazerPresenceAtEpoch(allocator: std.mem.Allocator, store: *storage
 
 pub fn publishLazerPresence(allocator: std.mem.Allocator, store: *storage.Store, sessions: *sessions_mod.Sessions, user: domain.User) !void {
     return publishLazerPresenceAtEpoch(allocator, store, sessions, user, captureLazerPresenceEpoch(sessions));
+}
+
+pub fn refreshLazerCountry(allocator: std.mem.Allocator, store: *storage.Store, sessions: *sessions_mod.Sessions, user: domain.User) !void {
+    if (user.restricted) return;
+    var snapshot = LazerPresenceSnapshot.init(user);
+    const current_stats = try presenceStats(store, &snapshot);
+    var event = protocol.Writer.init(allocator);
+    defer event.deinit();
+    try presence(&event, &snapshot, current_stats.global_rank);
+    sessions.mutex.lockUncancelable(sessions.io);
+    defer sessions.mutex.unlock(sessions.io);
+    if (!sessions.lazer_leases.contains(user.id) or sessions.onlineByUser(user.id) != null) return;
+    try sessions.broadcast(event.bytes(), null);
 }
 
 pub fn publishLazerLogout(allocator: std.mem.Allocator, sessions: *sessions_mod.Sessions, user_id: i32) !void {

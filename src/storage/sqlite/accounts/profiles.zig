@@ -244,11 +244,26 @@ pub fn updateCountry(self: *Store, user_id: i32, value: [2]u8) !void {
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
     var stmt: ?*c.sqlite3_stmt = null;
-    if (c.sqlite3_prepare_v2(self.db, "UPDATE users SET country=?1,last_login=unixepoch() WHERE id=?2", -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    if (c.sqlite3_prepare_v2(self.db, "UPDATE users SET country=?1 WHERE id=?2", -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(stmt);
     _ = c.sqlite3_bind_text(stmt, 1, value[0..].ptr, 2, null);
     _ = c.sqlite3_bind_int(stmt, 2, user_id);
     if (c.sqlite3_step(stmt) != c.SQLITE_DONE) return error.DatabaseQueryFailed;
+}
+
+pub fn countryOnLogin(self: *Store, user_id: i32, value: ?[2]u8) ![2]u8 {
+    self.mutex.lockUncancelable(self.io);
+    defer self.mutex.unlock(self.io);
+    var stmt: ?*c.sqlite3_stmt = null;
+    const sql = "UPDATE users SET country=CASE WHEN country='XX' AND ?1 IS NOT NULL THEN ?1 ELSE country END,last_login=unixepoch() WHERE id=?2 RETURNING country";
+    if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    defer _ = c.sqlite3_finalize(stmt);
+    if (value) |code| _ = c.sqlite3_bind_text(stmt, 1, code[0..].ptr, 2, null) else _ = c.sqlite3_bind_null(stmt, 1);
+    _ = c.sqlite3_bind_int(stmt, 2, user_id);
+    if (c.sqlite3_step(stmt) != c.SQLITE_ROW) return error.DatabaseQueryFailed;
+    const result = std.mem.span(c.sqlite3_column_text(stmt, 0));
+    if (result.len != 2) return error.DatabaseQueryFailed;
+    return .{ result[0], result[1] };
 }
 
 pub fn siteProfile(self: *Store, allocator: std.mem.Allocator, user_id: i32, source: domain.SiteScoreSource, stats_mode: u8) !?[]u8 {

@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 65,
+      "version": "2026.926.0",
+      "display_version": "flags and banners should just work",
+      "created_at": "2026-09-26T13:19:40Z",
+      "updates": [
+        {
+          "name": "2026-09-26-login-flags-and-banners.md",
+          "created_at": "2026-09-26T13:19:40Z",
+          "commit": "",
+          "sha256": "4d27473bec3defbae9de7baaea174bebcc5ff2756b6f539a9843bcc21fa76749"
+        }
+      ]
+    },
+    {
       "id": 64,
       "version": "2026.925.0",
       "display_version": "watch replays from a profile",
