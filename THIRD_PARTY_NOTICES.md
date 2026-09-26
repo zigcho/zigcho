@@ -43,6 +43,14 @@ the local Rust bridge in `pp/` links these direct dependencies:
 dependencies. those crates remain under the license files published with each
 crate; Zigcho does not relicense them.
 
+## browser replay playback
+
+the website bundles [`replayviewer-js` 1.0.0](https://github.com/daladal/replayviewer-js) in
+`src/web/vendor/replayviewer/` for local browser playback. its code is MIT,
+Copyright (c) 2026 bog; the complete notice is kept next to the bundled files.
+zigcho generates its own basic playback skin at runtime and does not ship the
+sample skin, sample maps or osu! resource assets from that project.
+
 ## protocol references
 
 Stable protocol and achievement compatibility reference the MIT-licensed

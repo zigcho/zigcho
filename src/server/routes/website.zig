@@ -124,6 +124,11 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
     if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/design.css")) return respond(req, .ok, "text/css; charset=utf-8", @embedFile("../../web/design.css"), &.{.{ .name = "cache-control", .value = "no-cache" }});
     if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/profile.js")) return respond(req, .ok, "text/javascript; charset=utf-8", @embedFile("../../web/profile.js"), &.{.{ .name = "cache-control", .value = "no-cache" }});
     if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/profile.css")) return respond(req, .ok, "text/css; charset=utf-8", @embedFile("../../web/profile.css"), &.{.{ .name = "cache-control", .value = "no-cache" }});
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/replay-player.css")) return respond(req, .ok, "text/css; charset=utf-8", @embedFile("../../web/replay-player.css"), &.{.{ .name = "cache-control", .value = "no-cache" }});
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/replay-player.js")) return respond(req, .ok, "text/javascript; charset=utf-8", @embedFile("../../web/replay-player.js"), &.{.{ .name = "cache-control", .value = "no-cache" }});
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/replayviewer.js")) return respond(req, .ok, "text/javascript; charset=utf-8", @embedFile("../../web/vendor/replayviewer/index.js"), &.{.{ .name = "cache-control", .value = "public, max-age=86400" }});
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/replayviewer-stretch-worker.js")) return respond(req, .ok, "text/javascript; charset=utf-8", @embedFile("../../web/vendor/replayviewer/stretch-worker.js"), &.{.{ .name = "cache-control", .value = "public, max-age=86400" }});
+    if (req.head.method == .GET and std.mem.eql(u8, path, "/assets/replay-skin/index.json")) return respond(req, .ok, "application/json", "{\"files\":[]}", &.{.{ .name = "cache-control", .value = "public, max-age=86400" }});
     if (std.mem.eql(u8, path, "/api/v1/appeals")) {
         const no_store = [_]std.http.Header{
             .{ .name = "cache-control", .value = "no-store" },

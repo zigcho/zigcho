@@ -54,7 +54,6 @@ const anticheat_abi = d.anticheat_abi;
 const anticheat_evidence = d.anticheat_evidence;
 const anticheat_plugin = d.anticheat_plugin;
 const anticheat_replay = d.anticheat_replay;
-const site_replay_preview = d.site_replay_preview;
 const player_routes = d.player_routes;
 const http_boundary = d.http_boundary;
 const stable_score_auth = d.stable_score_auth;
@@ -113,36 +112,6 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
     const auth_owned = ctx.auth_owned;
     const host_owned = ctx.host_owned;
     const cookie_owned = ctx.cookie_owned;
-    if (req.head.method == .GET and std.mem.startsWith(u8, path, "/api/v1/replays/") and std.mem.endsWith(u8, path, "/preview")) {
-        const selection = path["/api/v1/replays/".len .. path.len - "/preview".len];
-        const separator = std.mem.indexOfScalar(u8, selection, '/') orelse return respond(req, .not_found, "application/json", "{\"error\":\"replay not found\"}", &.{});
-        const source = selection[0..separator];
-        const id_text = selection[separator + 1 ..];
-        if (id_text.len == 0 or std.mem.indexOfScalar(u8, id_text, '/') != null) return respond(req, .not_found, "application/json", "{\"error\":\"replay not found\"}", &.{});
-        const score_id = std.fmt.parseInt(i64, id_text, 10) catch return respond(req, .not_found, "application/json", "{\"error\":\"replay not found\"}", &.{});
-        if (score_id <= 0) return respond(req, .not_found, "application/json", "{\"error\":\"replay not found\"}", &.{});
-        const replay = if (std.mem.eql(u8, source, "stable"))
-            try self.store.siteReplay(self.allocator, score_id)
-        else if (std.mem.eql(u8, source, "lazer"))
-            try self.store.lazerReplay(self.allocator, score_id)
-        else
-            return respond(req, .not_found, "application/json", "{\"error\":\"replay not found\"}", &.{});
-        const data = replay orelse return respond(req, .not_found, "application/json", "{\"error\":\"replay not found\"}", &.{});
-        defer self.allocator.free(data);
-        const replay_header = site_replay_preview.parseHeader(data) catch return respond(req, .unprocessable_entity, "application/json", "{\"error\":\"replay preview unavailable\"}", &.{});
-        const map_file = (try self.store.beatmapFile(self.allocator, replay_header.md5)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"beatmap file unavailable\"}", &.{});
-        defer self.allocator.free(map_file);
-        const preview = site_replay_preview.render(self.allocator, replay_header, map_file) catch |err| {
-            if (err == error.OutOfMemory) return err;
-            return respond(req, .unprocessable_entity, "application/json", "{\"error\":\"replay preview unavailable\"}", &.{});
-        };
-        defer self.allocator.free(preview);
-        if (self.websiteViewerId(cookie_owned)) |viewer_id| self.recordReplayViewBestEffort(viewer_id, if (std.mem.eql(u8, source, "stable")) .stable else .lazer, score_id);
-        return respond(req, .ok, "application/json", preview, &.{
-            .{ .name = "cache-control", .value = "no-store" },
-            .{ .name = "x-content-type-options", .value = "nosniff" },
-        });
-    }
     if (req.head.method == .GET) if (lazer.parseScoreDownloadPath(path)) |score_id| {
         const user = (try self.lazerUser(auth_owned, "identify")) orelse return respond(req, .unauthorized, "application/json", "{\"error\":\"unauthorized\"}", &.{});
         defer freeUser(self.allocator, user);
@@ -275,6 +244,18 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         const set_id = std.fmt.parseInt(i32, set_id_text, 10) catch return respond(req, .bad_request, "text/plain", "", &.{});
         if (set_id <= 0) return respond(req, .bad_request, "application/json", "{\"error\":\"invalid beatmap set\"}", &.{});
         return self.serveBeatmapArchive(req, set_id);
+    }
+    if (req.head.method == .GET and std.mem.startsWith(u8, path, "/api/v1/beatmaps/") and std.mem.endsWith(u8, path, "/file")) {
+        const id_text = path["/api/v1/beatmaps/".len .. path.len - "/file".len];
+        if (id_text.len == 0 or std.mem.indexOfScalar(u8, id_text, '/') != null) return respond(req, .not_found, "application/json", "{\"error\":\"beatmap file unavailable\"}", &.{});
+        const map_id = std.fmt.parseInt(i32, id_text, 10) catch return respond(req, .not_found, "application/json", "{\"error\":\"beatmap file unavailable\"}", &.{});
+        if (map_id <= 0) return respond(req, .not_found, "application/json", "{\"error\":\"beatmap file unavailable\"}", &.{});
+        const map_file = (try self.store.beatmapFileById(self.allocator, map_id)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"beatmap file unavailable\"}", &.{});
+        defer self.allocator.free(map_file);
+        return respond(req, .ok, "application/x-osu-beatmap", map_file, &.{
+            .{ .name = "cache-control", .value = "public, max-age=3600" },
+            .{ .name = "x-content-type-options", .value = "nosniff" },
+        });
     }
     if (req.head.method == .GET and std.mem.startsWith(u8, path, "/api/v2/beatmapsets/") and std.mem.endsWith(u8, path, "/download")) {
         const id_text = path["/api/v2/beatmapsets/".len .. path.len - "/download".len];
