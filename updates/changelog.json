@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 67,
+      "version": "2026.930.0",
+      "display_version": "zigcho!lazer 1.0.0 and score multipliers",
+      "created_at": "2026-09-30T02:45:00Z",
+      "updates": [
+        {
+          "name": "2026-09-30-lazer-score-multipliers-and-v1.md",
+          "created_at": "2026-09-30T02:45:00Z",
+          "commit": "",
+          "sha256": "7626649dca303f4b225f28604677708b2be027497ddfe69621372a5707f9a025"
+        }
+      ]
+    },
+    {
       "id": 66,
       "version": "2026.927.0",
       "display_version": "profile settings finally line up",
