@@ -549,6 +549,23 @@ pub fn parseScore(value: std.json.Value) !ScoreInput {
         else => return error.InvalidScore,
     } else null;
     if (maximum_statistics) |maximum| try validateStatistics(maximum);
+    const rank: ?[]const u8 = if (obj.get("rank")) |rank_value| switch (rank_value) {
+        .string => |v| if (validRank(v)) v else return error.InvalidScore,
+        .null => null,
+        else => return error.InvalidScore,
+    } else null;
+    const pauses: ?std.json.Array = if (obj.get("pauses")) |pauses_value| switch (pauses_value) {
+        .array => |v| v,
+        .null => null,
+        else => return error.InvalidScore,
+    } else null;
+    if (pauses) |list| {
+        if (list.items.len > max_pauses) return error.InvalidScore;
+        for (list.items) |pause| switch (pause) {
+            .integer => |v| if (v < std.math.minInt(i32) or v > std.math.maxInt(i32)) return error.InvalidScore,
+            else => return error.InvalidScore,
+        };
+    }
     const client_version: ?[]const u8 = if (obj.get("client_version")) |client_value| switch (client_value) {
         .string => |v| v,
         .null => null,
@@ -569,6 +586,8 @@ pub fn parseScore(value: std.json.Value) !ScoreInput {
         .mods = mods,
         .statistics = statistics,
         .maximum_statistics = maximum_statistics,
+        .rank = rank,
+        .pauses = pauses,
         .client_version = client_version,
         .namespace = namespace,
     };
@@ -646,13 +665,17 @@ test "old room unmodded score fallback is not an explicit replay claim" {
     const old = try parseScore(missing.value);
     try std.testing.expectEqual(@as(i64, 100), old.total_score_without_mods);
     try std.testing.expect(!old.total_score_without_mods_supplied);
+    try std.testing.expect(old.rank == null and old.pauses == null);
     const supplied = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
-        \\{"beatmap_id":75,"ruleset_id":0,"total_score":100,"total_score_without_mods":0,"accuracy":1,"max_combo":1,"passed":true,"mods":[],"statistics":{"great":1}}
+        \\{"beatmap_id":75,"ruleset_id":0,"total_score":100,"total_score_without_mods":0,"accuracy":1,"max_combo":1,"passed":true,"rank":"A","pauses":[-1913,2000],"mods":[],"statistics":{"great":1}}
     , .{});
     defer supplied.deinit();
     const explicit = try parseScore(supplied.value);
     try std.testing.expectEqual(@as(i64, 0), explicit.total_score_without_mods);
     try std.testing.expect(explicit.total_score_without_mods_supplied);
+    try std.testing.expectEqualStrings("A", explicit.rank.?);
+    try std.testing.expectEqual(@as(i64, -1913), explicit.pauses.?.items[0].integer);
+    try std.testing.expectEqual(@as(i64, 2000), explicit.pauses.?.items[1].integer);
 }
 
 pub const SoloScorePath = struct {
