@@ -8,8 +8,10 @@ mod settings stay out of behavioural rules the current detector cannot model.
 the staff anticheat panel keeps the two score sources separate.
 
 new native uploads also need their compressed solo-score metadata. its statistics,
-maximum statistics, mods and settings, pauses, rank and supplied unmodded total
-must agree with the upload. changing the replay version does not skip that check.
+maximum statistics, mods and settings must agree with the upload, as must any
+stored pauses, rank and unmodded total. older trailers can lack those newer fields;
+absence is not a contradictory claim. changing the replay version does not skip
+the core checks.
 this catches inconsistent score claims; it is not full replay re-scoring or proof
 that a matching play is clean. old saved replays remain downloadable.
 

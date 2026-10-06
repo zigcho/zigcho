@@ -116,18 +116,20 @@ fn validateSoloJson(allocator: std.mem.Allocator, decoded: []const u8, claims: ?
     const mods = object.get("mods") orelse return error.ReplayScoreMismatch;
     if (mods != .array or !sameMods(mods.array.items, if (expected.mods) |list| list.items else &.{})) return error.ReplayScoreMismatch;
     if (expected.pauses) |pauses| {
-        const value = object.get("pauses") orelse return error.ReplayScoreMismatch;
-        if (!sameJson(value, .{ .array = pauses })) return error.ReplayScoreMismatch;
+        if (object.get("pauses")) |value| {
+            if (!sameJson(value, .{ .array = pauses })) return error.ReplayScoreMismatch;
+        }
     }
     if (expected.rank) |rank| {
-        const value = object.get("rank") orelse return error.ReplayScoreMismatch;
-        if (value != .string or !std.mem.eql(u8, value.string, rank)) return error.ReplayScoreMismatch;
+        if (object.get("rank")) |value| {
+            if (value != .null and (value != .string or !std.mem.eql(u8, value.string, rank))) return error.ReplayScoreMismatch;
+        }
     }
     if (expected.total_score_without_mods) |expected_total| {
-        const total = object.get("total_score_without_mods") orelse return error.ReplayScoreMismatch;
-        if (total == .null) {
-            if (expected_total != 0) return error.ReplayScoreMismatch;
-        } else if (total != .integer or total.integer != expected_total) return error.ReplayScoreMismatch;
+        if (object.get("total_score_without_mods")) |total| {
+            // Null is an absent claim: the pinned decoder may reconstruct it.
+            if (total != .null and (total != .integer or total.integer != expected_total)) return error.ReplayScoreMismatch;
+        }
     }
 }
 
@@ -311,6 +313,11 @@ test "native solo claims agree despite ordering zero omission and identity metad
     sparse_room_claims.pauses = null;
     sparse_room_claims.rank = null;
     try validateSoloJson(std.testing.allocator, solo_fixture, sparse_room_claims);
+    // Official native taiko version30000004 lacks these newer fields. They
+    // cannot be checked against values reconstructed by a newer decoder.
+    try validateSoloJson(std.testing.allocator,
+        \\{"mods":[{"acronym":"HD"},{"acronym":"DT","settings":{"speed_change":1.5}}],"statistics":{"great":10},"maximum_statistics":{"great":10}}
+    , fixtureClaims(parsed.value));
 }
 
 test "native trailer cannot claim different stats maximums rates pauses ranks or totals" {

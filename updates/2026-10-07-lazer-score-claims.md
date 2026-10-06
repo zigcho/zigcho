@@ -4,7 +4,9 @@ we were checking the replay frames but only measuring the compressed score-info
 trailer. that trailer is now decoded with its own size, nesting and memory limits.
 
 new native submissions have to carry matching statistics, maximum statistics,
-mods and settings, pauses, rank and the supplied unmodded score. reordering mods,
+mods and settings. stored pauses, rank and a supplied unmodded score are compared
+when the trailer actually carries them; older trailers can lack those newer fields.
+reordering mods,
 omitting zero hit counts and using default settings still work. older room requests
 aren't compared against fields the server had to invent for compatibility.
 
