@@ -37,7 +37,7 @@ test "check exemptions are explicit scoped expiring revocable and distinct from 
 }
 
 test "lazer observations cannot accidentally point to a stable score" {
-    try std.testing.expectError(error.InvalidAnticheatObservation, storage.validateAnticheatObservation(5, .{ .source = .lazer_score, .score_id = 42, .module = "fixture", .action = 1 }));
-    try std.testing.expectError(error.InvalidAnticheatObservation, storage.validateAnticheatObservation(5, .{ .source = .stable_score, .lazer_score_id = 42, .module = "fixture", .action = 1 }));
-    try storage.validateAnticheatObservation(5, .{ .source = .lazer_score, .lazer_score_id = 42, .module = "fixture", .action = 1 });
+    try std.testing.expectError(error.InvalidAnticheatObservation, storage.validateAnticheatObservation(5, .{ .source = .lazer_score, .score_id = 42, .module = "fixture", .action = 1, .reason = 0, .risk_score = 0, .confidence_bps = 0 }));
+    try std.testing.expectError(error.InvalidAnticheatObservation, storage.validateAnticheatObservation(5, .{ .source = .stable_score, .lazer_score_id = 42, .module = "fixture", .action = 1, .reason = 0, .risk_score = 0, .confidence_bps = 0 }));
+    try storage.validateAnticheatObservation(5, .{ .source = .lazer_score, .lazer_score_id = 42, .module = "fixture", .action = 1, .reason = 0, .risk_score = 0, .confidence_bps = 0 });
 }
