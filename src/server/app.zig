@@ -52,6 +52,11 @@ pub const App = struct {
     http_long_request_timeout_seconds: u16,
     game_session_mutexes: [game_session_lock_count]std.Io.Mutex = [_]std.Io.Mutex{.init} ** game_session_lock_count,
     server_control_mutex: std.Io.Mutex = .init,
+    anticheat_score_mutexes: [64]std.Io.Mutex = [_]std.Io.Mutex{.init} ** 64,
+
+    pub fn anticheatScoreMutex(self: *App, map_md5: []const u8) *std.Io.Mutex {
+        return &self.anticheat_score_mutexes[std.hash.Wyhash.hash(0, map_md5) % self.anticheat_score_mutexes.len];
+    }
 
     pub const persistRejectedHostAnticheatObservation = anticheat.persistRejectedHostAnticheatObservation;
     pub const persistRejectedGameplayObservation = anticheat.persistRejectedGameplayObservation;

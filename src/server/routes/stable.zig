@@ -564,10 +564,27 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         }) catch return respond(req, .ok, "text/plain", "error: beatmap", &.{});
         score.achievement_stars = performance.stars;
         const elapsed_ms = if (score.passed) score_time else fail_time;
+        // Serialize analysis, insertion and fingerprints for this map so two
+        // concurrent accounts cannot both miss the first copy of a replay.
+        const anticheat_transition = self.anticheatScoreMutex(score.map_md5);
+        anticheat_transition.lockUncancelable(self.store.io);
+        defer anticheat_transition.unlock(self.store.io);
         var replay_digest: [32]u8 = undefined;
         const has_replay_fingerprint = replay.data.len != 0 and !self.anticheatChecksExcluded(user.id, .stable_score);
         if (has_replay_fingerprint) std.crypto.hash.sha2.Sha256.hash(replay.data, &replay_digest, .{});
         const pre_match_count = if (has_replay_fingerprint and score.passed) self.store.crossAccountReplayMatchesForMap(user.id, score.map_md5, score.mode, &replay_digest) catch 0 else 0;
+        if (self.anticheat_enforce_integrity and score.passed and pre_match_count != 0) {
+            self.persistRejectedHostAnticheatObservation(user.id, .stable_score, .{
+                .action = anticheat_abi.Action.challenge,
+                .reason = anticheat_abi.Reason.replay_hash_reused,
+                .risk_score = 900,
+                .confidence_bps = 9900,
+                .evidence = anticheat_abi.Evidence.replay_hash_reused,
+                .replay_match_count = pre_match_count,
+                .decision_flags = anticheat_abi.DecisionFlag.write_audit | anticheat_abi.DecisionFlag.require_staff_review | anticheat_abi.DecisionFlag.hold_score,
+            });
+            return rejectStableScore(req, "cross_account_replay_reuse", body.len);
+        }
         const observation_before_insert = self.observeStableGameplay(user.id, score, replay.data, map_file, performance, elapsed_ms, pre_match_count);
         if (self.anticheat_enforce_integrity and score.passed) switch (observation_before_insert) {
             .invalid_replay => {
