@@ -55,14 +55,14 @@ fn reasonInfo(code: u32) ?CodeInfo {
         abi.Reason.client_integrity_mismatch => .{ .name = "client integrity mismatch", .description = "normalized client integrity evidence did not match the expected client" },
         abi.Reason.high_confidence_client_flag => .{ .name = "high confidence client flag", .description = "the Stable client reported a high confidence integrity signal" },
         abi.Reason.exact_hardware_match => .{ .name = "exact hardware match", .description = "the Stable login hardware matched one or more other accounts exactly" },
-        abi.Reason.impossible_accuracy => .{ .name = "impossible accuracy", .description = "the submitted accuracy is not possible for the supplied hit results" },
+        abi.Reason.impossible_accuracy => .{ .name = "impossible accuracy", .description = "the submitted accuracy is outside the valid range" },
         abi.Reason.impossible_hit_totals => .{ .name = "impossible hit totals", .description = "the submitted hit counts do not fit the beatmap object count" },
         abi.Reason.impossible_combo => .{ .name = "impossible combo", .description = "the submitted combo is above the beatmap maximum" },
         abi.Reason.checksum_mismatch => .{ .name = "checksum mismatch", .description = "a normalized score or client checksum signal did not match" },
         abi.Reason.replay_hash_reused => .{ .name = "replay reused across accounts", .description = "the same passed replay payload appeared on another account for the same map and mode" },
-        abi.Reason.required_replay_missing => .{ .name = "required replay missing", .description = "a passed Stable score arrived without its required replay" },
+        abi.Reason.required_replay_missing => .{ .name = "required replay missing", .description = "a passed score arrived without its required replay" },
         abi.Reason.combined_anomalies => .{ .name = "combined anomalies", .description = "multiple independent score or client signals were present together" },
-        abi.Reason.invalid_replay_payload => .{ .name = "invalid replay payload", .description = "the Stable replay could not be decoded or validated safely" },
+        abi.Reason.invalid_replay_payload => .{ .name = "invalid replay payload", .description = "the replay could not be decoded or validated safely" },
         abi.Reason.replay_content_reused => .{ .name = "replay content reused", .description = "normalized replay content matched another account after volatile metadata was removed" },
         abi.Reason.timing_outlier => .{ .name = "timing outlier", .description = "score or replay timing was outside the ordinary shape" },
         abi.Reason.pp_outlier => .{ .name = "performance outlier", .description = "performance value was unusual for the supplied score evidence" },
@@ -279,6 +279,13 @@ pub fn writeObservationJson(writer: *std.Io.Writer, observation: Observation) !v
     try writer.writeAll(",\"description\":\"the detection ruleset version reported by this module; compare revisions only within the same module\"},\"metrics\":");
     try writeMetrics(writer, observation.metrics);
     try writer.writeByte('}');
+}
+
+test "shared replay descriptions do not mislabel native lazer findings as Stable" {
+    for ([_]u32{ abi.Reason.required_replay_missing, abi.Reason.invalid_replay_payload }) |code| {
+        try std.testing.expect(std.mem.indexOf(u8, reasonInfo(code).?.description, "Stable") == null);
+    }
+    try std.testing.expectEqualStrings("the submitted accuracy is outside the valid range", reasonInfo(abi.Reason.impossible_accuracy).?.description);
 }
 
 test "review decoder follows ABI codes and preserves unknown values" {
