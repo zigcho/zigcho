@@ -27,6 +27,7 @@ pub const Metrics = struct {
 };
 
 pub const Observation = struct {
+    enforced: bool = false,
     action: u32,
     reason: u32,
     risk_score: u32,
@@ -248,7 +249,9 @@ pub fn writePolicyJson(writer: *std.Io.Writer) !void {
 }
 
 pub fn writeObservationJson(writer: *std.Io.Writer, observation: Observation) !void {
-    try writer.writeAll("{\"observe_only\":true,\"outcome\":\"recorded for human review; no automatic player or score action was applied from this observation\",\"action\":");
+    try writer.print("{{\"observe_only\":{},\"enforced\":{},\"outcome\":", .{ !observation.enforced, observation.enforced });
+    try jsonString(writer, if (observation.enforced) "score rejected before persistence; stats and leaderboards were not changed; no account ban" else "recorded for human review; no automatic player or score action was applied from this observation");
+    try writer.writeAll(",\"action\":");
     try writeCode(writer, "action", observation.action, actionInfo(observation.action));
     try writer.writeAll(",\"reason\":");
     try writeCode(writer, "reason", observation.reason, reasonInfo(observation.reason));

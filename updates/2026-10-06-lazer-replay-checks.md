@@ -13,3 +13,7 @@ the host also has an integrity enforcement switch. it rejects broken passed
 replays and verifiable score-integrity failures before they reach stats or boards.
 behavioural detections still go to staff review, not automatic bans: their replay
 calibration is still being worked on.
+
+the paired private detector adds review-only timing checks. actual score
+rejections are marked separately in the staff panel, so a proposed action cannot
+look like something the host already did.

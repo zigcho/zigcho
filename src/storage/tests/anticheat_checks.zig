@@ -41,3 +41,24 @@ test "lazer observations cannot accidentally point to a stable score" {
     try std.testing.expectError(error.InvalidAnticheatObservation, storage.validateAnticheatObservation(5, .{ .source = .stable_score, .lazer_score_id = 42, .module = "fixture", .action = 1, .reason = 0, .risk_score = 0, .confidence_bps = 0 }));
     try storage.validateAnticheatObservation(5, .{ .source = .lazer_score, .lazer_score_id = 42, .module = "fixture", .action = 1, .reason = 0, .risk_score = 0, .confidence_bps = 0 });
 }
+
+test "applied integrity rejections do not coalesce into old observe-only findings" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&buf, ".zig-cache/tmp/{s}/rejections.db", .{tmp.sub_path});
+    var store = try storage.Store.open(std.testing.allocator, std.testing.io, path);
+    defer store.close();
+    try store.migrate();
+    const player = try store.register("rejection player", "rejection@example.invalid", "00000000000000000000000000000000");
+    var observation: storage.AnticheatObservation = .{ .source = .lazer_score, .module = "fixture", .action = 1, .reason = 2008, .risk_score = 500, .confidence_bps = 8000 };
+    const proposed = try store.recordAnticheatObservation(player, observation);
+    observation.enforced = true;
+    const rejected = try store.recordAnticheatObservation(player, observation);
+    try std.testing.expect(proposed != rejected);
+    try std.testing.expectEqual(rejected, try store.recordAnticheatObservation(player, observation));
+    const json = try store.staffAnticheatJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"enforced\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "score rejected before persistence") != null);
+}

@@ -389,6 +389,7 @@ CREATE TABLE anticheat_observations (
     score_id bigint REFERENCES scores(id) ON DELETE SET NULL,
     lazer_score_id bigint REFERENCES lazer_scores(id) ON DELETE SET NULL,
     source text NOT NULL CHECK(source IN ('stable_login','stable_lastfm','stable_score','lazer_score')),
+    enforced boolean NOT NULL DEFAULT false,
     module text NOT NULL CHECK(length(module) BETWEEN 1 AND 64),
     action smallint NOT NULL CHECK(action BETWEEN 0 AND 3),
     sample_weight integer NOT NULL DEFAULT 1 CHECK(sample_weight BETWEEN 1 AND 100000),

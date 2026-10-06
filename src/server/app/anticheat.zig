@@ -201,8 +201,8 @@ pub fn rejectLazerAnticheat(self: anytype, user_id: i32, score: lazer.ScoreInput
     };
     if (!reject) return false;
     switch (observation) {
-        .result => |value| self.persistGameplayObservation(user_id, .lazer_score, null, 1, value.evidence, 0, value.result),
-        else => self.persistHostAnticheatObservation(user_id, .lazer_score, null, anticheat_evidence.stableReplay(if (observation == .missing_replay) .missing else .invalid_payload, 0)),
+        .result => |value| self.persistRejectedGameplayObservation(user_id, .lazer_score, value.evidence, 0, value.result),
+        else => self.persistRejectedHostAnticheatObservation(user_id, .lazer_score, anticheat_evidence.stableReplay(if (std.meta.activeTag(observation) == .missing_replay) .missing else .invalid_payload, 0)),
     }
     std.log.warn("event=anticheat_score_rejected source=lazer user_id={d} beatmap_id={d} reason=score_integrity", .{ user_id, score.beatmap_id });
     return true;
@@ -211,7 +211,7 @@ pub fn rejectLazerAnticheat(self: anytype, user_id: i32, score: lazer.ScoreInput
 pub fn persistLazerAnticheat(self: anytype, user_id: i32, score_id: i64, observation: LazerGameplayObservation) void {
     switch (observation) {
         .none => {},
-        .invalid_replay, .missing_replay => self.persistHostAnticheatObservation(user_id, .lazer_score, null, anticheat_evidence.stableReplay(if (observation == .missing_replay) .missing else .invalid_payload, 0)),
+        .invalid_replay, .missing_replay => self.persistHostAnticheatObservation(user_id, .lazer_score, score_id, anticheat_evidence.stableReplay(if (std.meta.activeTag(observation) == .missing_replay) .missing else .invalid_payload, 0)),
         .result => |value| {
             const sampled = value.result.decision.action == anticheat_abi.Action.allow and self.anticheat_allow_sample_modulus != 0 and @mod(score_id, @as(i64, self.anticheat_allow_sample_modulus)) == 0;
             if (value.result.decision.action != anticheat_abi.Action.allow or sampled) self.persistGameplayObservation(user_id, .lazer_score, score_id, if (sampled) self.anticheat_allow_sample_modulus else 1, value.evidence, 0, value.result);
@@ -239,10 +239,20 @@ pub fn stableReplayShadowEvidence(passed: bool, suspicious_cadence: bool, replay
 }
 
 pub fn persistHostAnticheatObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, observation: anticheat_evidence.Observation) void {
+    persistHostObservation(self, user_id, source, score_id, observation, false);
+}
+
+pub fn persistRejectedHostAnticheatObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, observation: anticheat_evidence.Observation) void {
+    persistHostObservation(self, user_id, source, null, observation, true);
+}
+
+fn persistHostObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, observation: anticheat_evidence.Observation, enforced: bool) void {
     _ = self.store.recordAnticheatObservation(user_id, .{
         .source = source,
         .module = anticheat_evidence.module_name,
-        .score_id = score_id,
+        .score_id = if (source == .stable_score) score_id else null,
+        .lazer_score_id = if (source == .lazer_score) score_id else null,
+        .enforced = enforced,
         .action = observation.action,
         .reason = observation.reason,
         .risk_score = observation.risk_score,
@@ -435,12 +445,21 @@ pub fn persistAnticheatObservation(self: anytype, user_id: i32, score_id: i64, s
 }
 
 pub fn persistGameplayObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, sample_weight: u32, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV1) void {
+    persistGameplayObservationImpl(self, user_id, source, score_id, sample_weight, evidence, replay_match_count, result, false);
+}
+
+pub fn persistRejectedGameplayObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV1) void {
+    persistGameplayObservationImpl(self, user_id, source, null, 1, evidence, replay_match_count, result, true);
+}
+
+fn persistGameplayObservationImpl(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, sample_weight: u32, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV1, enforced: bool) void {
     const host = if (self.anticheat) |*loaded| loaded else return;
     _ = self.store.recordAnticheatObservation(user_id, .{
         .source = source,
         .module = host.name(),
         .score_id = if (source == .stable_score) score_id else null,
         .lazer_score_id = if (source == .lazer_score) score_id else null,
+        .enforced = enforced,
         .action = result.decision.action,
         .sample_weight = sample_weight,
         .reason = result.decision.reason,

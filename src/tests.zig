@@ -967,7 +967,7 @@ test "anticheat review exclusions suppress the queue without suppressing evidenc
 
 test "staff anticheat renders canonical backend meanings as observe only proposals" {
     try std.testing.expect(std.mem.indexOf(u8, index_page, "staffAnticheatDecoded") != null);
-    try std.testing.expect(std.mem.indexOf(u8, index_page, "proposed ${esc(action.display)}") != null);
+    try std.testing.expect(std.mem.indexOf(u8, index_page, "m.enforced?'applied rejection'") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "${esc(reason.description)}") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "rule confidence") != null);
     try std.testing.expect(std.mem.indexOf(u8, index_page, "anticheatMetricFacts(m.metrics)") != null);

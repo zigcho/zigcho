@@ -2,6 +2,7 @@ BEGIN;
 ALTER TABLE zigcho.anticheat_review_exclusions ADD COLUMN skip_checks boolean NOT NULL DEFAULT false;
 ALTER TABLE zigcho.anticheat_observations DROP CONSTRAINT anticheat_observations_source_check;
 ALTER TABLE zigcho.anticheat_observations ADD CONSTRAINT anticheat_observations_source_check CHECK(source IN ('stable_login','stable_lastfm','stable_score','lazer_score'));
+ALTER TABLE zigcho.anticheat_observations ADD COLUMN enforced boolean NOT NULL DEFAULT false;
 ALTER TABLE zigcho.anticheat_observations ADD COLUMN lazer_score_id bigint REFERENCES zigcho.lazer_scores(id) ON DELETE SET NULL;
 ALTER TABLE zigcho.anticheat_observations ADD CONSTRAINT anticheat_observations_stable_identity CHECK(score_id IS NULL OR (source='stable_score' AND lazer_score_id IS NULL));
 ALTER TABLE zigcho.anticheat_observations ADD CONSTRAINT anticheat_observations_lazer_identity CHECK(lazer_score_id IS NULL OR (source='lazer_score' AND score_id IS NULL));

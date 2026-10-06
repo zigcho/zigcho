@@ -571,11 +571,11 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         const observation_before_insert = self.observeStableGameplay(user.id, score, replay.data, map_file, performance, elapsed_ms, pre_match_count);
         if (self.anticheat_enforce_integrity and score.passed) switch (observation_before_insert) {
             .invalid_replay => {
-                self.persistHostAnticheatObservation(user.id, .stable_score, null, anticheat_evidence.stableReplay(.invalid_payload, 0));
+                self.persistRejectedHostAnticheatObservation(user.id, .stable_score, anticheat_evidence.stableReplay(.invalid_payload, 0));
                 return rejectStableScore(req, "invalid_replay", body.len);
             },
             .result => |value| if (@import("../../anticheat_policy.zig").rejectScore(true, true, value.result.decision)) {
-                self.persistGameplayObservation(user.id, .stable_score, null, 1, value.evidence, pre_match_count, value.result);
+                self.persistRejectedGameplayObservation(user.id, .stable_score, value.evidence, pre_match_count, value.result);
                 return rejectStableScore(req, "anticheat_score_integrity", body.len);
             },
             .none => {},

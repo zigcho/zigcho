@@ -53,6 +53,8 @@ pub const App = struct {
     game_session_mutexes: [game_session_lock_count]std.Io.Mutex = [_]std.Io.Mutex{.init} ** game_session_lock_count,
     server_control_mutex: std.Io.Mutex = .init,
 
+    pub const persistRejectedHostAnticheatObservation = anticheat.persistRejectedHostAnticheatObservation;
+    pub const persistRejectedGameplayObservation = anticheat.persistRejectedGameplayObservation;
     pub const observeLazerGameplay = anticheat.observeLazerGameplay;
     pub const rejectLazerAnticheat = anticheat.rejectLazerAnticheat;
     pub const persistLazerAnticheat = anticheat.persistLazerAnticheat;

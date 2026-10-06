@@ -217,6 +217,7 @@ pub const AnticheatReviewLabel = enum {
 pub const AnticheatObservation = struct {
     source: AnticheatSource,
     lazer_score_id: ?i64 = null,
+    enforced: bool = false,
     module: []const u8,
     score_id: ?i64 = null,
     action: u32,

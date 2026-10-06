@@ -6,6 +6,7 @@ CREATE TABLE anticheat_observations_next (
     score_id INTEGER REFERENCES scores(id) ON DELETE SET NULL,
     lazer_score_id INTEGER REFERENCES lazer_scores(id) ON DELETE SET NULL,
     source TEXT NOT NULL CHECK(source IN ('stable_login','stable_lastfm','stable_score','lazer_score')),
+    enforced INTEGER NOT NULL DEFAULT 0 CHECK(enforced IN(0,1)),
     module TEXT NOT NULL CHECK(length(module) BETWEEN 1 AND 64),
     action INTEGER NOT NULL CHECK(action BETWEEN 0 AND 3),
     sample_weight INTEGER NOT NULL DEFAULT 1 CHECK(sample_weight BETWEEN 1 AND 100000),

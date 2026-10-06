@@ -242,7 +242,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
     }
     if (observation.score_id == null and observation.lazer_score_id == null) {
         var existing: ?*c.sqlite3_stmt = null;
-        const existing_sql = "SELECT id FROM anticheat_observations WHERE user_id=?1 AND score_id IS NULL AND review_label='pending' AND source=?3 AND module=?4 AND action=?5 AND sample_weight=?6 AND reason=?7 AND risk_score=?8 AND confidence_bps=?9 AND evidence=?10 AND decision_flags=?11 AND rule_revision=?12 AND objects_checked=?13 AND matched_clicks=?14 AND mean_abs_timing_error_milli=?15 AND timing_stddev_milli=?16 AND exact_timing_bps=?17 AND center_hits_bps=?18 AND mean_center_distance_milli=?19 AND snap_events=?20 AND replay_match_count=?21 AND key_press_count=?22 AND key_hold_count=?23 AND mean_hold_duration_milli=?24 AND hold_duration_stddev_milli=?25 AND alternation_bps=?26 AND target_distance_stddev_milli=?27 AND velocity_spike_count=?28 AND movement_velocity_stddev_milli=?29 AND coalesce(review_exclusion_id,0)=?30 AND created_at>=unixepoch()-86400 ORDER BY id DESC LIMIT 1";
+        const existing_sql = "SELECT id FROM anticheat_observations WHERE user_id=?1 AND score_id IS NULL AND review_label='pending' AND source=?3 AND module=?4 AND action=?5 AND sample_weight=?6 AND reason=?7 AND risk_score=?8 AND confidence_bps=?9 AND evidence=?10 AND decision_flags=?11 AND rule_revision=?12 AND objects_checked=?13 AND matched_clicks=?14 AND mean_abs_timing_error_milli=?15 AND timing_stddev_milli=?16 AND exact_timing_bps=?17 AND center_hits_bps=?18 AND mean_center_distance_milli=?19 AND snap_events=?20 AND replay_match_count=?21 AND key_press_count=?22 AND key_hold_count=?23 AND mean_hold_duration_milli=?24 AND hold_duration_stddev_milli=?25 AND alternation_bps=?26 AND target_distance_stddev_milli=?27 AND velocity_spike_count=?28 AND movement_velocity_stddev_milli=?29 AND coalesce(review_exclusion_id,0)=?30 AND enforced=?32 AND created_at>=unixepoch()-86400 ORDER BY id DESC LIMIT 1";
         if (c.sqlite3_prepare_v2(self.db, existing_sql, -1, &existing, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
         defer _ = c.sqlite3_finalize(existing);
         _ = c.sqlite3_bind_int(existing, 1, user_id);
@@ -275,6 +275,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
         _ = c.sqlite3_bind_int64(existing, 28, observation.velocity_spike_count);
         _ = c.sqlite3_bind_int64(existing, 29, observation.movement_velocity_stddev_milli);
         _ = c.sqlite3_bind_int64(existing, 30, review_exclusion_id orelse 0);
+        _ = c.sqlite3_bind_int(existing, 32, @intFromBool(observation.enforced));
         if (c.sqlite3_step(existing) == c.SQLITE_ROW) {
             const observation_id = c.sqlite3_column_int64(existing, 0);
             try self.exec("COMMIT");
@@ -282,7 +283,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
         }
     }
     var stmt: ?*c.sqlite3_stmt = null;
-    const sql = "INSERT INTO anticheat_observations(user_id,score_id,source,module,action,sample_weight,reason,risk_score,confidence_bps,evidence,decision_flags,rule_revision,objects_checked,matched_clicks,mean_abs_timing_error_milli,timing_stddev_milli,exact_timing_bps,center_hits_bps,mean_center_distance_milli,snap_events,replay_match_count,key_press_count,key_hold_count,mean_hold_duration_milli,hold_duration_stddev_milli,alternation_bps,target_distance_stddev_milli,velocity_spike_count,movement_velocity_stddev_milli,review_exclusion_id,lazer_score_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)";
+    const sql = "INSERT INTO anticheat_observations(user_id,score_id,source,module,action,sample_weight,reason,risk_score,confidence_bps,evidence,decision_flags,rule_revision,objects_checked,matched_clicks,mean_abs_timing_error_milli,timing_stddev_milli,exact_timing_bps,center_hits_bps,mean_center_distance_milli,snap_events,replay_match_count,key_press_count,key_hold_count,mean_hold_duration_milli,hold_duration_stddev_milli,alternation_bps,target_distance_stddev_milli,velocity_spike_count,movement_velocity_stddev_milli,review_exclusion_id,lazer_score_id,enforced) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31,?32)";
     if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(stmt);
     _ = c.sqlite3_bind_int(stmt, 1, user_id);
@@ -317,6 +318,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
     _ = c.sqlite3_bind_int64(stmt, 27, observation.target_distance_stddev_milli);
     _ = c.sqlite3_bind_int64(stmt, 28, observation.velocity_spike_count);
     _ = c.sqlite3_bind_int64(stmt, 29, observation.movement_velocity_stddev_milli);
+    _ = c.sqlite3_bind_int(stmt, 32, @intFromBool(observation.enforced));
     if (observation.lazer_score_id) |id| _ = c.sqlite3_bind_int64(stmt, 31, id) else _ = c.sqlite3_bind_null(stmt, 31);
     if (review_exclusion_id) |id|
         _ = c.sqlite3_bind_int64(stmt, 30, id)
@@ -414,7 +416,7 @@ pub fn staffAnticheatJson(self: *Store, allocator: std.mem.Allocator) ![]u8 {
     const suppressed_pending = c.sqlite3_column_int64(pending_stmt, 1);
 
     var stmt: ?*c.sqlite3_stmt = null;
-    const sql = "SELECT o.id,o.user_id,u.name,coalesce(o.score_id,o.lazer_score_id,0),o.source,o.module,o.action,o.sample_weight,o.reason,o.risk_score,o.confidence_bps,o.evidence,o.decision_flags,o.rule_revision,o.objects_checked,o.matched_clicks,o.mean_abs_timing_error_milli,o.timing_stddev_milli,o.exact_timing_bps,o.center_hits_bps,o.mean_center_distance_milli,o.snap_events,o.replay_match_count,o.key_press_count,o.key_hold_count,o.mean_hold_duration_milli,o.hold_duration_stddev_milli,o.alternation_bps,o.target_distance_stddev_milli,o.velocity_spike_count,o.movement_velocity_stddev_milli,o.review_label,coalesce(reviewer.name,''),o.review_note,coalesce(o.reviewed_at,0),o.created_at,coalesce(x.id,0),coalesce(x.scope,''),coalesce(x.reason,''),coalesce(creator.name,''),coalesce(x.created_at,0),coalesce(x.expires_at,0),coalesce(revoker.name,''),coalesce(x.revoked_at,0),coalesce(x.revoke_reason,'') FROM anticheat_observations o JOIN users u ON u.id=o.user_id LEFT JOIN users reviewer ON reviewer.id=o.reviewer_id LEFT JOIN anticheat_review_exclusions x ON x.id=o.review_exclusion_id LEFT JOIN users creator ON creator.id=x.created_by LEFT JOIN users revoker ON revoker.id=x.revoked_by WHERE o.id IN(SELECT id FROM anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM anticheat_observations WHERE review_label!='pending' ORDER BY created_at DESC,id DESC LIMIT 250) ORDER BY (o.review_label='pending' AND o.review_exclusion_id IS NULL) DESC,(o.review_label='pending' AND o.review_exclusion_id IS NOT NULL) DESC,o.created_at DESC,o.id DESC";
+    const sql = "SELECT o.id,o.user_id,u.name,coalesce(o.score_id,o.lazer_score_id,0),o.source,o.module,o.action,o.sample_weight,o.reason,o.risk_score,o.confidence_bps,o.evidence,o.decision_flags,o.rule_revision,o.objects_checked,o.matched_clicks,o.mean_abs_timing_error_milli,o.timing_stddev_milli,o.exact_timing_bps,o.center_hits_bps,o.mean_center_distance_milli,o.snap_events,o.replay_match_count,o.key_press_count,o.key_hold_count,o.mean_hold_duration_milli,o.hold_duration_stddev_milli,o.alternation_bps,o.target_distance_stddev_milli,o.velocity_spike_count,o.movement_velocity_stddev_milli,o.review_label,coalesce(reviewer.name,''),o.review_note,coalesce(o.reviewed_at,0),o.created_at,coalesce(x.id,0),coalesce(x.scope,''),coalesce(x.reason,''),coalesce(creator.name,''),coalesce(x.created_at,0),coalesce(x.expires_at,0),coalesce(revoker.name,''),coalesce(x.revoked_at,0),coalesce(x.revoke_reason,''),o.enforced FROM anticheat_observations o JOIN users u ON u.id=o.user_id LEFT JOIN users reviewer ON reviewer.id=o.reviewer_id LEFT JOIN anticheat_review_exclusions x ON x.id=o.review_exclusion_id LEFT JOIN users creator ON creator.id=x.created_by LEFT JOIN users revoker ON revoker.id=x.revoked_by WHERE o.id IN(SELECT id FROM anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM anticheat_observations WHERE review_label!='pending' ORDER BY created_at DESC,id DESC LIMIT 250) ORDER BY (o.review_label='pending' AND o.review_exclusion_id IS NULL) DESC,(o.review_label='pending' AND o.review_exclusion_id IS NOT NULL) DESC,o.created_at DESC,o.id DESC";
     if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(stmt);
     var output: std.Io.Writer.Allocating = .init(allocator);
@@ -467,6 +469,7 @@ pub fn staffAnticheatJson(self: *Store, allocator: std.mem.Allocator) ![]u8 {
         try output.writer.writeAll(",\"meaning\":");
         try anticheat_review.writeObservationJson(&output.writer, .{
             .action = @intCast(c.sqlite3_column_int64(stmt, 6)),
+            .enforced = c.sqlite3_column_int(stmt, 45) != 0,
             .reason = @intCast(c.sqlite3_column_int64(stmt, 8)),
             .risk_score = @intCast(c.sqlite3_column_int64(stmt, 9)),
             .confidence_bps = @intCast(c.sqlite3_column_int64(stmt, 10)),
