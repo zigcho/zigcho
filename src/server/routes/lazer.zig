@@ -1060,6 +1060,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             score.achievement_mods = performance.mods;
             score.achievement_perfect = performance.max_combo > 0 and score.max_combo >= performance.max_combo;
             const observation: @import("../app/anticheat.zig").LazerGameplayObservation = if (try self.store.lazerScoreTokenReady(user.id, @intCast(score.beatmap_id), token_id, score.ruleset_id)) self.observeLazerGameplay(user.id, score, replay_data, mods_json, performance) else .none;
+            if (std.meta.activeTag(observation) == .unavailable) return respond(req, .service_unavailable, "application/json", "{\"error\":\"replay verification temporarily unavailable\"}", &.{});
             if (self.rejectLazerAnticheat(user.id, score, observation)) return respond(req, .unprocessable_entity, "application/json", "{\"error\":\"score failed anticheat integrity checks\"}", &.{});
             const score_id = self.store.submitLazerScoreToken(user.id, solo_path.beatmap_id, token_id, score, performance.pp, mods_json, statistics_json, maximum_statistics_json, pauses_json, replay_data) catch |err| return switch (err) {
                 error.InvalidLazerScoreToken, error.ForeignLazerScoreToken, error.LazerScoreTokenExpired => respond(req, .unauthorized, "application/json", "{\"error\":\"invalid or expired score token\"}", &.{}),
@@ -1202,6 +1203,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             score.achievement_mods = performance.mods;
             score.achievement_perfect = performance.max_combo > 0 and score.max_combo >= performance.max_combo;
             const observation: @import("../app/anticheat.zig").LazerGameplayObservation = if (try self.store.lazerScoreTokenReady(user.id, @intCast(score.beatmap_id), token_id, score.ruleset_id)) self.observeLazerGameplay(user.id, score, replay_data, mods_json, performance) else .none;
+            if (std.meta.activeTag(observation) == .unavailable) return respond(req, .service_unavailable, "application/json", "{\"error\":\"replay verification temporarily unavailable\"}", &.{});
             if (self.rejectLazerAnticheat(user.id, score, observation)) return respond(req, .unprocessable_entity, "application/json", "{\"error\":\"score failed anticheat integrity checks\"}", &.{});
             var recovered = false;
             var room_total_score = score.total_score;

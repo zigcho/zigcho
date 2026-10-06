@@ -73,6 +73,11 @@ pub fn validatePayload(allocator: std.mem.Allocator, replay: []const u8, ruleset
 }
 
 pub fn decompress(allocator: std.mem.Allocator, compressed: []const u8) ![]u8 {
+    return decompressLimited(allocator, compressed, max_decompressed_bytes);
+}
+
+pub fn decompressLimited(allocator: std.mem.Allocator, compressed: []const u8, limit: usize) ![]u8 {
+    if (limit == 0 or limit > max_decompressed_bytes) return error.InvalidReplay;
     var input = std.Io.Reader.fixed(compressed);
     const decode_buffer = try allocator.alloc(u8, 4096);
     var decoder = std.compress.lzma.Decompress.initOptions(&input, allocator, decode_buffer, .{}, max_lzma_memory) catch |err| {
@@ -83,7 +88,7 @@ pub fn decompress(allocator: std.mem.Allocator, compressed: []const u8) ![]u8 {
         };
     };
     defer decoder.deinit();
-    return decoder.reader.allocRemaining(allocator, .limited(max_decompressed_bytes)) catch |err| switch (err) {
+    return decoder.reader.allocRemaining(allocator, .limited(limit)) catch |err| switch (err) {
         error.OutOfMemory => return error.OutOfMemory,
         error.ReadFailed => {
             if (decoder.err) |decode_error| switch (decode_error) {

@@ -63,6 +63,7 @@ fn reasonInfo(code: u32) ?CodeInfo {
         abi.Reason.required_replay_missing => .{ .name = "required replay missing", .description = "a passed score arrived without its required replay" },
         abi.Reason.combined_anomalies => .{ .name = "combined anomalies", .description = "multiple independent score or client signals were present together" },
         abi.Reason.invalid_replay_payload => .{ .name = "invalid replay payload", .description = "the replay could not be decoded or validated safely" },
+        abi.Reason.replay_score_mismatch => .{ .name = "replay score mismatch", .description = "native replay statistics, mods or other score claims disagree with the submitted score; this is not a re-scored cheat verdict" },
         abi.Reason.replay_content_reused => .{ .name = "replay content reused", .description = "normalized replay content matched another account after volatile metadata was removed" },
         abi.Reason.timing_outlier => .{ .name = "timing outlier", .description = "score or replay timing was outside the ordinary shape" },
         abi.Reason.pp_outlier => .{ .name = "performance outlier", .description = "performance value was unusual for the supplied score evidence" },

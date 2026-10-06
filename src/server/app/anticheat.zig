@@ -108,6 +108,8 @@ pub const LazerGameplayObservation = union(enum) {
     none,
     invalid_replay,
     missing_replay,
+    score_mismatch,
+    unavailable,
     result: struct { result: anticheat_abi.GameplayResultV1, evidence: u64 },
 };
 
@@ -121,7 +123,7 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
     if (bytes.len == 0) return if (score.passed) .missing_replay else .none;
     const timer = @import("../../telemetry.zig").Timer.start(.replay_analysis);
     defer timer.finish();
-    const map = (self.store.beatmapFileById(self.allocator, @intCast(score.beatmap_id)) catch return .none) orelse return .none;
+    const map = (self.store.beatmapFileById(self.allocator, @intCast(score.beatmap_id)) catch |err| return if (err == error.OutOfMemory) .unavailable else .none) orelse return .none;
     defer self.allocator.free(map);
     var map_digest: [16]u8 = undefined;
     std.crypto.hash.Md5.hash(map, &map_digest, .{});
@@ -130,13 +132,29 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
         std.log.warn("event=anticheat_lazer_replay_parse_failed user_id={d} ruleset={d} error={t}", .{ user_id, score.ruleset_id, err });
         return .invalid_replay;
     };
+    lazer_replay.validateSoloClaims(self.allocator, info, .{
+        .statistics = score.statistics,
+        .maximum_statistics = score.maximum_statistics,
+        .mods = score.mods,
+        .pauses = score.pauses,
+        .rank = score.rank,
+        .total_score_without_mods = if (score.total_score_without_mods_supplied) score.total_score_without_mods else null,
+    }) catch |err| return switch (err) {
+        error.OutOfMemory => .unavailable,
+        error.ReplayScoreMismatch => .score_mismatch,
+        else => .invalid_replay,
+    };
     if (score.ruleset_id != 0) {
-        anticheat_replay.validatePayload(self.allocator, info.frames, @intCast(score.ruleset_id)) catch |err| return if (err == error.OutOfMemory) .none else .invalid_replay;
+        anticheat_replay.validatePayload(self.allocator, info.frames, @intCast(score.ruleset_id)) catch |err| return if (err == error.OutOfMemory) .unavailable else .invalid_replay;
         return .none;
     }
     var prepared = anticheat_replay.prepare(self.allocator, info.frames, map, info.mods) catch |err| {
         std.log.warn("event=anticheat_lazer_replay_prepare_failed user_id={d} error={t}", .{ user_id, err });
-        return if (err == error.InvalidReplay) .invalid_replay else .none;
+        return switch (err) {
+            error.InvalidReplay => .invalid_replay,
+            error.OutOfMemory => .unavailable,
+            else => .none,
+        };
     };
     defer prepared.deinit();
     const host = if (self.anticheat) |*loaded| loaded else return .none;
@@ -195,14 +213,14 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
 pub fn rejectLazerAnticheat(self: anytype, user_id: i32, score: lazer.ScoreInput, observation: LazerGameplayObservation) bool {
     if (!self.anticheat_enforce_integrity or !score.passed) return false;
     const reject = switch (observation) {
-        .invalid_replay, .missing_replay => true,
+        .invalid_replay, .missing_replay, .score_mismatch => true,
         .result => |value| anticheat_policy.rejectScore(true, score.passed, value.result.decision),
-        .none => false,
+        .none, .unavailable => false,
     };
     if (!reject) return false;
     switch (observation) {
         .result => |value| self.persistRejectedGameplayObservation(user_id, .lazer_score, value.evidence, 0, value.result),
-        else => self.persistRejectedHostAnticheatObservation(user_id, .lazer_score, anticheat_evidence.stableReplay(if (std.meta.activeTag(observation) == .missing_replay) .missing else .invalid_payload, 0)),
+        else => self.persistRejectedHostAnticheatObservation(user_id, .lazer_score, anticheat_evidence.stableReplay(lazerReplayIssue(observation), 0)),
     }
     std.log.warn("event=anticheat_score_rejected source=lazer user_id={d} beatmap_id={d} reason=score_integrity", .{ user_id, score.beatmap_id });
     return true;
@@ -210,13 +228,21 @@ pub fn rejectLazerAnticheat(self: anytype, user_id: i32, score: lazer.ScoreInput
 
 pub fn persistLazerAnticheat(self: anytype, user_id: i32, score_id: i64, observation: LazerGameplayObservation) void {
     switch (observation) {
-        .none => {},
-        .invalid_replay, .missing_replay => self.persistHostAnticheatObservation(user_id, .lazer_score, score_id, anticheat_evidence.stableReplay(if (std.meta.activeTag(observation) == .missing_replay) .missing else .invalid_payload, 0)),
+        .none, .unavailable => {},
+        .invalid_replay, .missing_replay, .score_mismatch => self.persistHostAnticheatObservation(user_id, .lazer_score, score_id, anticheat_evidence.stableReplay(lazerReplayIssue(observation), 0)),
         .result => |value| {
             const sampled = value.result.decision.action == anticheat_abi.Action.allow and self.anticheat_allow_sample_modulus != 0 and @mod(score_id, @as(i64, self.anticheat_allow_sample_modulus)) == 0;
             if (value.result.decision.action != anticheat_abi.Action.allow or sampled) self.persistGameplayObservation(user_id, .lazer_score, score_id, if (sampled) self.anticheat_allow_sample_modulus else 1, value.evidence, 0, value.result);
         },
     }
+}
+
+fn lazerReplayIssue(observation: LazerGameplayObservation) anticheat_evidence.ReplayIssue {
+    return switch (observation) {
+        .missing_replay => .missing,
+        .score_mismatch => .score_mismatch,
+        else => .invalid_payload,
+    };
 }
 
 pub fn stableScoreEvidence(score: stable_score.Submission) u64 {

@@ -423,6 +423,9 @@ pub const ScoreInput = struct {
     ruleset_id: i64,
     total_score: i64,
     total_score_without_mods: i64,
+    // Legacy room requests may omit this field; do not compare a synthesized
+    // fallback with a native replay's original score claim.
+    total_score_without_mods_supplied: bool = true,
     legacy_total_score: ?i32 = null,
     accuracy: f64,
     max_combo: i64,
@@ -558,6 +561,7 @@ pub fn parseScore(value: std.json.Value) !ScoreInput {
         .ruleset_id = ruleset_id,
         .total_score = total_score,
         .total_score_without_mods = total_score_without_mods orelse legacy_total_score_value orelse total_score,
+        .total_score_without_mods_supplied = total_score_without_mods != null,
         .legacy_total_score = legacy_total_score,
         .accuracy = accuracy,
         .max_combo = combo,
@@ -632,6 +636,23 @@ pub fn parseSoloScore(value: std.json.Value, beatmap_id: i32) !ScoreInput {
         .rank = rank,
         .namespace = namespace,
     };
+}
+
+test "old room unmodded score fallback is not an explicit replay claim" {
+    const missing = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\{"beatmap_id":75,"ruleset_id":0,"total_score":100,"accuracy":1,"max_combo":1,"passed":true,"mods":[],"statistics":{"great":1}}
+    , .{});
+    defer missing.deinit();
+    const old = try parseScore(missing.value);
+    try std.testing.expectEqual(@as(i64, 100), old.total_score_without_mods);
+    try std.testing.expect(!old.total_score_without_mods_supplied);
+    const supplied = try std.json.parseFromSlice(std.json.Value, std.testing.allocator,
+        \\{"beatmap_id":75,"ruleset_id":0,"total_score":100,"total_score_without_mods":0,"accuracy":1,"max_combo":1,"passed":true,"mods":[],"statistics":{"great":1}}
+    , .{});
+    defer supplied.deinit();
+    const explicit = try parseScore(supplied.value);
+    try std.testing.expectEqual(@as(i64, 0), explicit.total_score_without_mods);
+    try std.testing.expect(explicit.total_score_without_mods_supplied);
 }
 
 pub const SoloScorePath = struct {

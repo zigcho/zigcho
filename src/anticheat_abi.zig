@@ -81,6 +81,8 @@ pub const Reason = struct {
     pub const combined_anomalies: u32 = 2007;
     pub const invalid_replay_payload: u32 = 2008;
     pub const replay_content_reused: u32 = 2009;
+    // Host-side native replay/submission agreement, not a new ABI layout.
+    pub const replay_score_mismatch: u32 = 2010;
     pub const timing_outlier: u32 = 3001;
     pub const pp_outlier: u32 = 3002;
     pub const multiaccount_cluster: u32 = 3003;

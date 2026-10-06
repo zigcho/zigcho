@@ -4,7 +4,7 @@ const stable_score = @import("stable_score.zig");
 const stable_mods = @import("stable_mods.zig");
 
 pub const module_name = "zigcho-host";
-pub const rule_revision: u32 = 1;
+pub const rule_revision: u32 = 2;
 
 pub const Observation = struct {
     action: u32 = abi.Action.audit,
@@ -25,6 +25,7 @@ pub const Signal = struct {
 pub const ReplayIssue = enum {
     missing,
     invalid_payload,
+    score_mismatch,
 };
 
 pub const StableScoreIssue = enum {
@@ -95,10 +96,12 @@ pub fn stableReplay(issue: ReplayIssue, replay_match_count: u32) Observation {
         .reason = switch (issue) {
             .missing => abi.Reason.required_replay_missing,
             .invalid_payload => abi.Reason.invalid_replay_payload,
+            .score_mismatch => abi.Reason.replay_score_mismatch,
         },
         .risk_score = switch (issue) {
             .missing => 200,
             .invalid_payload => 250 + @min(bounded_matches, 5) * @as(u32, 25),
+            .score_mismatch => 300,
         },
         .evidence = (if (issue == .missing) abi.Evidence.required_replay_missing else 0) |
             (if (bounded_matches != 0) abi.Evidence.replay_hash_reused else 0),
@@ -141,6 +144,12 @@ pub fn stableScoreSignal(score: stable_score.Submission, issue: StableScoreIssue
 }
 
 test "host evidence remains review only" {
+    const mismatch = stableReplay(.score_mismatch, 0);
+    try std.testing.expectEqual(abi.Reason.replay_score_mismatch, mismatch.reason);
+    try std.testing.expectEqual(abi.Action.audit, mismatch.action);
+    try std.testing.expectEqual(@as(u32, 2), mismatch.rule_revision);
+    try std.testing.expectEqual(@as(u64, 0), mismatch.evidence);
+    try std.testing.expect(mismatch.decision_flags & abi.DecisionFlag.disconnect_session == 0);
     try std.testing.expect(stableLogin(0, true) == null);
     const hardware = stableLogin(1, false).?;
     try std.testing.expectEqual(abi.Action.audit, hardware.action);
