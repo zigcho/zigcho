@@ -123,7 +123,12 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
     if (bytes.len == 0) return if (score.passed) .missing_replay else .none;
     const timer = @import("../../telemetry.zig").Timer.start(.replay_analysis);
     defer timer.finish();
-    const map = (self.store.beatmapFileById(self.allocator, @intCast(score.beatmap_id)) catch |err| return if (err == error.OutOfMemory) .unavailable else .none) orelse return .none;
+    // A missing trusted map is an operational failure, not a cheat verdict or
+    // permission to accept an unchecked upload under integrity enforcement.
+    const map = (self.store.beatmapFileById(self.allocator, @intCast(score.beatmap_id)) catch |err| {
+        std.log.warn("event=anticheat_lazer_map_lookup_failed error={t}", .{err});
+        return if (self.anticheat_enforce_integrity or err == error.OutOfMemory) .unavailable else .none;
+    }) orelse return if (self.anticheat_enforce_integrity) .unavailable else .none;
     defer self.allocator.free(map);
     var map_digest: [16]u8 = undefined;
     std.crypto.hash.Md5.hash(map, &map_digest, .{});
