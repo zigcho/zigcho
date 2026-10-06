@@ -1059,6 +1059,8 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             score.achievement_stars = performance.stars;
             score.achievement_mods = performance.mods;
             score.achievement_perfect = performance.max_combo > 0 and score.max_combo >= performance.max_combo;
+            const observation: @import("../app/anticheat.zig").LazerGameplayObservation = if (try self.store.lazerScoreTokenReady(user.id, @intCast(score.beatmap_id), token_id, score.ruleset_id)) self.observeLazerGameplay(user.id, score, replay_data, mods_json, performance) else .none;
+            if (self.rejectLazerAnticheat(user.id, score, observation)) return respond(req, .unprocessable_entity, "application/json", "{\"error\":\"score failed anticheat integrity checks\"}", &.{});
             const score_id = self.store.submitLazerScoreToken(user.id, solo_path.beatmap_id, token_id, score, performance.pp, mods_json, statistics_json, maximum_statistics_json, pauses_json, replay_data) catch |err| return switch (err) {
                 error.InvalidLazerScoreToken, error.ForeignLazerScoreToken, error.LazerScoreTokenExpired => respond(req, .unauthorized, "application/json", "{\"error\":\"invalid or expired score token\"}", &.{}),
                 error.LazerScoreTokenUsed => respond(req, .conflict, "application/json", "{\"error\":\"score token already used\"}", &.{}),
@@ -1071,6 +1073,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
                     break :failed false;
                 };
             }
+            self.persistLazerAnticheat(user.id, score_id, observation);
             const placement = self.afterLazerScore(user, score_id, score, performance.pp, mods_json);
             const json = try self.lazerScoreResponse(user.id, score_id, placement);
             defer self.allocator.free(json);
@@ -1198,6 +1201,8 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             score.achievement_stars = performance.stars;
             score.achievement_mods = performance.mods;
             score.achievement_perfect = performance.max_combo > 0 and score.max_combo >= performance.max_combo;
+            const observation: @import("../app/anticheat.zig").LazerGameplayObservation = if (try self.store.lazerScoreTokenReady(user.id, @intCast(score.beatmap_id), token_id, score.ruleset_id)) self.observeLazerGameplay(user.id, score, replay_data, mods_json, performance) else .none;
+            if (self.rejectLazerAnticheat(user.id, score, observation)) return respond(req, .unprocessable_entity, "application/json", "{\"error\":\"score failed anticheat integrity checks\"}", &.{});
             var recovered = false;
             var room_total_score = score.total_score;
             var room_accuracy = score.accuracy;
@@ -1244,6 +1249,7 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
                 defer self.allocator.free(json);
                 return respond(req, .ok, "application/json", json, &.{});
             }
+            self.persistLazerAnticheat(user.id, score_id, observation);
             const placement = self.afterLazerScore(user, score_id, score, performance.pp, mods_json);
             const json = try self.lazerScoreResponse(user.id, score_id, placement);
             defer self.allocator.free(json);

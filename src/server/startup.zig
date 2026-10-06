@@ -151,6 +151,7 @@ pub fn run(init: std.process.Init) !void {
         .score_webhook = webhook.Webhook.init(allocator, init.io, config.score_webhook),
         .anticheat = anticheat,
         .anticheat_allow_sample_modulus = config.anticheat_allow_sample_modulus,
+        .anticheat_enforce_integrity = config.anticheat_enforce_integrity,
         .avatar_store = if (object_store.enabled()) object_store else objects.configuredLegacyAvatarStore(config),
         .avatar_cache = avatar_cache.Cache.init(allocator, init.io),
         .geo_client = .{ .allocator = allocator, .io = init.io },
@@ -174,7 +175,7 @@ pub fn run(init: std.process.Init) !void {
     const kai_session = try app.sessions.createBot(kai);
     kai_session.longitude = -21.9426; // reykjavik
     kai_session.latitude = 64.1466;
-    if (app.anticheat) |*loaded| std.log.info("event=anticheat_module_loaded module={s} abi={d} rule_revision={d} mode=observe", .{ loaded.name(), anticheat_abi.version, loaded.ruleRevision() });
+    if (app.anticheat) |*loaded| std.log.info("event=anticheat_module_loaded module={s} abi={d} rule_revision={d} mode={s}", .{ loaded.name(), anticheat_abi.version, loaded.ruleRevision(), if (app.anticheat_enforce_integrity) "integrity" else "observe" });
     defer if (app.anticheat) |*loaded| loaded.close();
     defer app.score_webhook.deinit();
     defer app.avatar_cache.deinit();

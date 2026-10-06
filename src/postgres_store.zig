@@ -122,6 +122,12 @@ pub const Store = struct {
         return pg_accounts.register(self, name, email, password_md5);
     }
     const insertHardwareMatchAudit = pg_moderation.insertHardwareMatchAudit;
+    pub fn anticheatChecksExcluded(self: *Store, user_id: i32, source: AnticheatSource) !bool {
+        return pg_moderation.anticheatChecksExcluded(self, user_id, source);
+    }
+    pub fn createAnticheatCheckExclusion(self: *Store, actor_id: i32, user_id: i32, scope: AnticheatExclusionScope, duration_seconds: i64, reason: []const u8) !i64 {
+        return pg_moderation.createAnticheatCheckExclusion(self, actor_id, user_id, scope, duration_seconds, reason);
+    }
     pub fn createAnticheatExclusion(self: *Store, actor_id: i32, user_id: i32, scope: AnticheatExclusionScope, duration_seconds: i64, reason: []const u8) !i64 {
         return pg_moderation.createAnticheatExclusion(self, actor_id, user_id, scope, duration_seconds, reason);
     }
@@ -142,6 +148,9 @@ pub const Store = struct {
     }
     pub fn crossAccountReplayContentMatches(self: *Store, user_id: i32, map_md5: []const u8, mode: u8, digest: *const [32]u8) !u32 {
         return pg_moderation.crossAccountReplayContentMatches(self, user_id, map_md5, mode, digest);
+    }
+    pub fn crossAccountReplayMatchesForMap(self: *Store, user_id: i32, map_md5: []const u8, mode: u8, digest: *const [32]u8) !u32 {
+        return pg_moderation.crossAccountReplayMatchesForMap(self, user_id, map_md5, mode, digest);
     }
     pub fn recordReplayContentFingerprint(self: *Store, user_id: i32, score_id: i64, digest: *const [32]u8) !void {
         return pg_moderation.recordReplayContentFingerprint(self, user_id, score_id, digest);
@@ -825,6 +834,9 @@ pub const Store = struct {
     }
     pub fn submitLazerRoomScoreToken(self: *Store, user_id: i32, beatmap_id: i32, token_id: i64, input: lazer.ScoreInput, pp_value: f64, mods_json: []const u8, statistics_json: []const u8, maximum_statistics_json: []const u8, pauses_json: []const u8, replay_data: []const u8) !i64 {
         return pg_score_lazer.submitLazerRoomScoreToken(self, user_id, beatmap_id, token_id, input, pp_value, mods_json, statistics_json, maximum_statistics_json, pauses_json, replay_data);
+    }
+    pub fn lazerScoreTokenReady(self: *Store, user_id: i32, beatmap_id: i32, token_id: i64, ruleset: i64) !bool {
+        return pg_score_lazer.lazerScoreTokenReady(self, user_id, beatmap_id, token_id, ruleset);
     }
     const submitLazerScoreTokenScoped = pg_score_lazer.submitLazerScoreTokenScoped;
     pub fn statsForUser(self: *Store, user_id: i32, mode: u8) !?domain.Stats {

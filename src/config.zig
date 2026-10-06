@@ -10,6 +10,7 @@ pub const Config = struct {
     score_webhook: []u8,
     anticheat_module_path: []u8,
     anticheat_allow_sample_modulus: u32,
+    anticheat_enforce_integrity: bool = false,
     avatar_r2_endpoint: []u8,
     avatar_r2_bucket: []u8,
     avatar_r2_access_key_id: []u8,
@@ -123,6 +124,8 @@ pub fn parse(allocator: std.mem.Allocator, bytes: []const u8) !Config {
         } else if (std.mem.eql(u8, key, "anticheat_module_path")) {
             if (value.len <= 4096 and std.mem.indexOfScalar(u8, value, 0) == null)
                 try result.replace(&result.anticheat_module_path, value);
+        } else if (std.mem.eql(u8, key, "anticheat_enforce_integrity")) {
+            result.anticheat_enforce_integrity = std.mem.eql(u8, value, "true");
         } else if (std.mem.eql(u8, key, "anticheat_allow_sample_modulus")) {
             const parsed = std.fmt.parseInt(u32, value, 10) catch continue;
             if (parsed == 0 or (parsed >= 10 and parsed <= 100_000)) result.anticheat_allow_sample_modulus = parsed;

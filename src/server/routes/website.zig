@@ -1245,7 +1245,12 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
                     const target_user = (try self.store.userById(self.allocator, target_id)) orelse return respond(req, .not_found, "application/json", "{\"error\":\"player not found\"}", &no_store);
                     defer freeUser(self.allocator, target_user);
                     if (!web_auth.canManageAnticheatExclusion(staff_user, target_user)) return respond(req, .forbidden, "application/json", "{\"error\":\"self, bot, and staff exclusions are blocked for this account\"}", &no_store);
-                    const exclusion_id = self.store.createAnticheatExclusion(staff_user.id, target_id, scope, duration_seconds, reason) catch |err| switch (err) {
+                    const mode = (try form_urlencoded.requestField(self.allocator, body, content_type_owned, &.{"mode"})) orelse try self.allocator.dupe(u8, "review");
+                    defer self.allocator.free(mode);
+                    const skip_checks = std.mem.eql(u8, mode, "checks");
+                    if (!skip_checks and !std.mem.eql(u8, mode, "review")) return respond(req, .bad_request, "application/json", "{\"error\":\"invalid exclusion mode\"}", &no_store);
+                    const created = if (skip_checks) self.store.createAnticheatCheckExclusion(staff_user.id, target_id, scope, duration_seconds, reason) else self.store.createAnticheatExclusion(staff_user.id, target_id, scope, duration_seconds, reason);
+                    const exclusion_id = created catch |err| switch (err) {
                         error.AnticheatExclusionForbidden => return respond(req, .forbidden, "application/json", "{\"error\":\"administrator access or target eligibility changed\"}", &no_store),
                         error.AnticheatExclusionOverlap => return respond(req, .conflict, "application/json", "{\"error\":\"an overlapping exclusion is already active\"}", &no_store),
                         error.InvalidAnticheatExclusion => return respond(req, .bad_request, "application/json", "{\"error\":\"expiry must be between one hour and thirty days\"}", &no_store),
@@ -1285,7 +1290,9 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
             if (req.head.method == .GET) {
                 const json = try self.store.staffAnticheatJson(self.allocator);
                 defer self.allocator.free(json);
-                return respond(req, .ok, "application/json", json, &no_store);
+                const state = try std.fmt.allocPrint(self.allocator, "{s},\"integrity_enforced\":{},\"module_loaded\":{}}}", .{ json[0 .. json.len - 1], self.anticheat_enforce_integrity, self.anticheat != null });
+                defer self.allocator.free(state);
+                return respond(req, .ok, "application/json", state, &no_store);
             }
             if (req.head.method == .POST) {
                 const id_text = (try form_urlencoded.requestField(self.allocator, body, content_type_owned, &.{"observation_id"})) orelse return respond(req, .bad_request, "application/json", "{\"error\":\"observation required\"}", &no_store);

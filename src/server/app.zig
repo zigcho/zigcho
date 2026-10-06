@@ -38,6 +38,7 @@ pub const App = struct {
     score_webhook: webhook.Webhook,
     anticheat: ?anticheat_plugin.Host,
     anticheat_allow_sample_modulus: u32,
+    anticheat_enforce_integrity: bool = false,
     avatar_store: r2.Storage,
     avatar_cache: avatar_cache.Cache,
     geo_client: std.http.Client,
@@ -52,6 +53,11 @@ pub const App = struct {
     game_session_mutexes: [game_session_lock_count]std.Io.Mutex = [_]std.Io.Mutex{.init} ** game_session_lock_count,
     server_control_mutex: std.Io.Mutex = .init,
 
+    pub const observeLazerGameplay = anticheat.observeLazerGameplay;
+    pub const rejectLazerAnticheat = anticheat.rejectLazerAnticheat;
+    pub const persistLazerAnticheat = anticheat.persistLazerAnticheat;
+    pub const anticheatChecksExcluded = anticheat.anticheatChecksExcluded;
+    pub const persistGameplayObservation = anticheat.persistGameplayObservation;
     pub const anticheatNamespace = anticheat.anticheatNamespace;
     pub const stableScoreEvidence = anticheat.stableScoreEvidence;
     pub const stableGameplayEvidence = anticheat.stableGameplayEvidence;

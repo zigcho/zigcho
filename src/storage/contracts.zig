@@ -132,12 +132,14 @@ pub const HardwareEvidence = struct {
 };
 
 pub const AnticheatSource = enum {
+    lazer_score,
     stable_login,
     stable_lastfm,
     stable_score,
 
     pub fn text(self: AnticheatSource) []const u8 {
         return switch (self) {
+            .lazer_score => "lazer_score",
             .stable_login => "stable_login",
             .stable_lastfm => "stable_lastfm",
             .stable_score => "stable_score",
@@ -214,6 +216,7 @@ pub const AnticheatReviewLabel = enum {
 
 pub const AnticheatObservation = struct {
     source: AnticheatSource,
+    lazer_score_id: ?i64 = null,
     module: []const u8,
     score_id: ?i64 = null,
     action: u32,
@@ -247,6 +250,7 @@ pub fn validateAnticheatObservation(user_id: i32, observation: AnticheatObservat
     if (user_id <= 0 or observation.module.len == 0 or observation.module.len > 64 or !std.unicode.utf8ValidateSlice(observation.module)) return error.InvalidAnticheatObservation;
     if (observation.score_id) |score_id| if (score_id <= 0) return error.InvalidAnticheatObservation;
     if (observation.source != .stable_score and observation.score_id != null) return error.InvalidAnticheatObservation;
+    if (observation.lazer_score_id) |id| if (id <= 0 or observation.source != .lazer_score or observation.score_id != null) return error.InvalidAnticheatObservation;
     if (observation.action > 3 or observation.sample_weight == 0 or observation.sample_weight > 100_000 or observation.risk_score > 1000 or observation.confidence_bps > 10_000 or observation.replay_match_count > 100_000) return error.InvalidAnticheatObservation;
     if (observation.evidence > std.math.maxInt(i64) or observation.decision_flags > std.math.maxInt(i64)) return error.InvalidAnticheatObservation;
     if (observation.matched_clicks > observation.objects_checked or observation.snap_events > observation.objects_checked or observation.exact_timing_bps > 10_000 or observation.center_hits_bps > 10_000 or observation.key_hold_count > observation.key_press_count or observation.alternation_bps > 10_000) return error.InvalidAnticheatObservation;

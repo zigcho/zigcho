@@ -11,6 +11,20 @@ const pg_score_achievements = @import("../scores/achievements.zig");
 const pg_score_maintenance = @import("../scores/maintenance.zig");
 
 const ConsumedLazerScoreToken = storage_contracts.ConsumedLazerScoreToken;
+
+pub fn lazerScoreTokenReady(self: anytype, user_id: i32, beatmap_id: i32, token_id: i64, ruleset: i64) !bool {
+    var buffers: [4][64]u8 = undefined;
+    var cursor: usize = 0;
+    const token = try common.param(&buffers, &cursor, token_id);
+    const user = try common.param(&buffers, &cursor, user_id);
+    const map = try common.param(&buffers, &cursor, beatmap_id);
+    const mode = try common.param(&buffers, &cursor, ruleset);
+    var lease = self.pool.acquire();
+    defer lease.release();
+    var result = try postgres.queryParams(self.allocator, lease.conn, "SELECT 1 FROM zigcho.lazer_score_tokens WHERE id=$1 AND user_id=$2 AND beatmap_id=$3 AND ruleset_id=$4 AND consumed_at IS NULL AND expires_at>extract(epoch FROM clock_timestamp())::bigint", &.{ token, user, map, mode });
+    defer result.deinit();
+    return result.rows() != 0;
+}
 const lazerStatus = storage_contracts.lazerStatus;
 
 pub fn consumedLazerScoreToken(self: anytype, user_id: i32, beatmap_id: i32, token_id: i64) !?ConsumedLazerScoreToken {

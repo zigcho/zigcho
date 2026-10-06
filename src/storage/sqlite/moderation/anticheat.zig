@@ -14,6 +14,7 @@ const Store = @import("../../../storage.zig").Store;
 const jsonString = @import("../beatmaps/lazer_listing.zig").jsonString;
 
 pub fn recordClientHardware(self: *Store, user_id: i32, hardware: ClientHardware) !HardwareEvidence {
+    const excluded = self.anticheatChecksExcluded(user_id, .stable_login) catch false;
     var matched: std.ArrayList(i32) = .empty;
     errdefer matched.deinit(self.allocator);
 
@@ -23,7 +24,7 @@ pub fn recordClientHardware(self: *Store, user_id: i32, hardware: ClientHardware
     errdefer self.exec("ROLLBACK") catch {};
     try self.exec("DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log WHERE action='anticheat.hardware_match' AND created_at<unixepoch()-15552000 ORDER BY created_at,id LIMIT 128)");
 
-    if (hardware.actionable) {
+    if (hardware.actionable and !excluded) {
         var match_stmt: ?*c.sqlite3_stmt = null;
         const match_sql = "SELECT DISTINCT user_id FROM client_hardware WHERE user_id!=?1 AND user_id!=3 AND adapters_md5=?2 AND uninstall_md5=?3 AND disk_signature_md5=?4 ORDER BY user_id";
         if (c.sqlite3_prepare_v2(self.db, match_sql, -1, &match_stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
@@ -120,6 +121,14 @@ pub fn requireAnticheatExclusionAuthorityLocked(self: *Store, actor_id: i32, use
 }
 
 pub fn createAnticheatExclusion(self: *Store, actor_id: i32, user_id: i32, scope: AnticheatExclusionScope, duration_seconds: i64, reason: []const u8) !i64 {
+    return createExclusion(self, actor_id, user_id, scope, duration_seconds, reason, false);
+}
+
+pub fn createAnticheatCheckExclusion(self: *Store, actor_id: i32, user_id: i32, scope: AnticheatExclusionScope, duration_seconds: i64, reason: []const u8) !i64 {
+    return createExclusion(self, actor_id, user_id, scope, duration_seconds, reason, true);
+}
+
+fn createExclusion(self: *Store, actor_id: i32, user_id: i32, scope: AnticheatExclusionScope, duration_seconds: i64, reason: []const u8, skip_checks: bool) !i64 {
     const trimmed = try validateAnticheatExclusion(actor_id, user_id, duration_seconds, reason);
     self.mutex.lockUncancelable(self.io);
     defer self.mutex.unlock(self.io);
@@ -130,10 +139,11 @@ pub fn createAnticheatExclusion(self: *Store, actor_id: i32, user_id: i32, scope
 
     const scope_text = scope.text();
     var overlap: ?*c.sqlite3_stmt = null;
-    if (c.sqlite3_prepare_v2(self.db, "SELECT 1 FROM anticheat_review_exclusions WHERE user_id=?1 AND revoked_at IS NULL AND expires_at>unixepoch() AND (scope='all' OR ?2='all' OR scope=?2) LIMIT 1", -1, &overlap, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    if (c.sqlite3_prepare_v2(self.db, "SELECT 1 FROM anticheat_review_exclusions WHERE user_id=?1 AND revoked_at IS NULL AND expires_at>unixepoch() AND skip_checks=?3 AND (scope='all' OR ?2='all' OR scope=?2) LIMIT 1", -1, &overlap, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(overlap);
     _ = c.sqlite3_bind_int(overlap, 1, user_id);
     _ = c.sqlite3_bind_text(overlap, 2, scope_text.ptr, @intCast(scope_text.len), null);
+    _ = c.sqlite3_bind_int(overlap, 3, @intFromBool(skip_checks));
     switch (c.sqlite3_step(overlap)) {
         c.SQLITE_ROW => return error.AnticheatExclusionOverlap,
         c.SQLITE_DONE => {},
@@ -141,20 +151,21 @@ pub fn createAnticheatExclusion(self: *Store, actor_id: i32, user_id: i32, scope
     }
 
     var insert: ?*c.sqlite3_stmt = null;
-    if (c.sqlite3_prepare_v2(self.db, "INSERT INTO anticheat_review_exclusions(user_id,scope,reason,created_by,expires_at) VALUES(?1,?2,?3,?4,unixepoch()+?5) RETURNING id,expires_at", -1, &insert, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    if (c.sqlite3_prepare_v2(self.db, "INSERT INTO anticheat_review_exclusions(user_id,scope,reason,created_by,expires_at,skip_checks) VALUES(?1,?2,?3,?4,unixepoch()+?5,?6) RETURNING id,expires_at", -1, &insert, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(insert);
     _ = c.sqlite3_bind_int(insert, 1, user_id);
     _ = c.sqlite3_bind_text(insert, 2, scope_text.ptr, @intCast(scope_text.len), null);
     _ = c.sqlite3_bind_text(insert, 3, trimmed.ptr, @intCast(trimmed.len), null);
     _ = c.sqlite3_bind_int(insert, 4, actor_id);
     _ = c.sqlite3_bind_int64(insert, 5, duration_seconds);
+    _ = c.sqlite3_bind_int(insert, 6, @intFromBool(skip_checks));
     if (c.sqlite3_step(insert) != c.SQLITE_ROW) return error.DatabaseQueryFailed;
     const exclusion_id = c.sqlite3_column_int64(insert, 0);
     const expires_at = c.sqlite3_column_int64(insert, 1);
     if (c.sqlite3_step(insert) != c.SQLITE_DONE) return error.DatabaseQueryFailed;
     var detail_buf: [760]u8 = undefined;
-    const detail = try std.fmt.bufPrint(&detail_buf, "exclusion_id={d} scope={s} expires_at={d} reason={s}", .{ exclusion_id, scope_text, expires_at, trimmed });
-    try self.insertAuditLocked(actor_id, "anticheat.review_exclusion.create", user_id, detail);
+    const detail = try std.fmt.bufPrint(&detail_buf, "exclusion_id={d} scope={s} skip_checks={} expires_at={d} reason={s}", .{ exclusion_id, scope_text, skip_checks, expires_at, trimmed });
+    try self.insertAuditLocked(actor_id, if (skip_checks) "anticheat.check_exclusion.create" else "anticheat.review_exclusion.create", user_id, detail);
     try self.exec("COMMIT");
     return exclusion_id;
 }
@@ -215,12 +226,12 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
     // one identical pending signal per user and day, while score-linked
     // evidence remains unique and durable. Cleanup is deliberately bounded
     // so an observation write can never turn into a large maintenance job.
-    try self.exec("DELETE FROM anticheat_observations WHERE id IN (SELECT id FROM anticheat_observations WHERE score_id IS NULL AND source!='stable_score' AND ((review_label!='pending' AND reviewed_at<unixepoch()-15552000) OR (review_label='pending' AND created_at<unixepoch()-7776000)) ORDER BY created_at,id LIMIT 128)");
+    try self.exec("DELETE FROM anticheat_observations WHERE id IN (SELECT id FROM anticheat_observations WHERE score_id IS NULL AND source NOT IN('stable_score','lazer_score') AND ((review_label!='pending' AND reviewed_at<unixepoch()-15552000) OR (review_label='pending' AND created_at<unixepoch()-7776000)) ORDER BY created_at,id LIMIT 128)");
     try self.exec("DELETE FROM audit_log WHERE id IN (SELECT id FROM audit_log WHERE ((action='anticheat.observe' AND detail LIKE '% score_id=0 mode=observe %') OR action IN('anticheat.hardware_match','stable.lastfm_flag')) AND created_at<unixepoch()-15552000 ORDER BY created_at,id LIMIT 128)");
     const source = observation.source.text();
     var review_exclusion_id: ?i64 = null;
     var exclusion: ?*c.sqlite3_stmt = null;
-    if (c.sqlite3_prepare_v2(self.db, "SELECT id FROM anticheat_review_exclusions WHERE user_id=?1 AND revoked_at IS NULL AND expires_at>unixepoch() AND (scope='all' OR scope=?2) ORDER BY (scope=?2) DESC,created_at DESC,id DESC LIMIT 1", -1, &exclusion, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    if (c.sqlite3_prepare_v2(self.db, "SELECT id FROM anticheat_review_exclusions WHERE user_id=?1 AND revoked_at IS NULL AND expires_at>unixepoch() AND skip_checks=0 AND (scope='all' OR scope=?2) ORDER BY (scope=?2) DESC,created_at DESC,id DESC LIMIT 1", -1, &exclusion, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(exclusion);
     _ = c.sqlite3_bind_int(exclusion, 1, user_id);
     _ = c.sqlite3_bind_text(exclusion, 2, source.ptr, @intCast(source.len), null);
@@ -229,7 +240,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
         c.SQLITE_DONE => {},
         else => return error.DatabaseQueryFailed,
     }
-    if (observation.score_id == null) {
+    if (observation.score_id == null and observation.lazer_score_id == null) {
         var existing: ?*c.sqlite3_stmt = null;
         const existing_sql = "SELECT id FROM anticheat_observations WHERE user_id=?1 AND score_id IS NULL AND review_label='pending' AND source=?3 AND module=?4 AND action=?5 AND sample_weight=?6 AND reason=?7 AND risk_score=?8 AND confidence_bps=?9 AND evidence=?10 AND decision_flags=?11 AND rule_revision=?12 AND objects_checked=?13 AND matched_clicks=?14 AND mean_abs_timing_error_milli=?15 AND timing_stddev_milli=?16 AND exact_timing_bps=?17 AND center_hits_bps=?18 AND mean_center_distance_milli=?19 AND snap_events=?20 AND replay_match_count=?21 AND key_press_count=?22 AND key_hold_count=?23 AND mean_hold_duration_milli=?24 AND hold_duration_stddev_milli=?25 AND alternation_bps=?26 AND target_distance_stddev_milli=?27 AND velocity_spike_count=?28 AND movement_velocity_stddev_milli=?29 AND coalesce(review_exclusion_id,0)=?30 AND created_at>=unixepoch()-86400 ORDER BY id DESC LIMIT 1";
         if (c.sqlite3_prepare_v2(self.db, existing_sql, -1, &existing, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
@@ -271,7 +282,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
         }
     }
     var stmt: ?*c.sqlite3_stmt = null;
-    const sql = "INSERT INTO anticheat_observations(user_id,score_id,source,module,action,sample_weight,reason,risk_score,confidence_bps,evidence,decision_flags,rule_revision,objects_checked,matched_clicks,mean_abs_timing_error_milli,timing_stddev_milli,exact_timing_bps,center_hits_bps,mean_center_distance_milli,snap_events,replay_match_count,key_press_count,key_hold_count,mean_hold_duration_milli,hold_duration_stddev_milli,alternation_bps,target_distance_stddev_milli,velocity_spike_count,movement_velocity_stddev_milli,review_exclusion_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30)";
+    const sql = "INSERT INTO anticheat_observations(user_id,score_id,source,module,action,sample_weight,reason,risk_score,confidence_bps,evidence,decision_flags,rule_revision,objects_checked,matched_clicks,mean_abs_timing_error_milli,timing_stddev_milli,exact_timing_bps,center_hits_bps,mean_center_distance_milli,snap_events,replay_match_count,key_press_count,key_hold_count,mean_hold_duration_milli,hold_duration_stddev_milli,alternation_bps,target_distance_stddev_milli,velocity_spike_count,movement_velocity_stddev_milli,review_exclusion_id,lazer_score_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,?31)";
     if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(stmt);
     _ = c.sqlite3_bind_int(stmt, 1, user_id);
@@ -306,6 +317,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
     _ = c.sqlite3_bind_int64(stmt, 27, observation.target_distance_stddev_milli);
     _ = c.sqlite3_bind_int64(stmt, 28, observation.velocity_spike_count);
     _ = c.sqlite3_bind_int64(stmt, 29, observation.movement_velocity_stddev_milli);
+    if (observation.lazer_score_id) |id| _ = c.sqlite3_bind_int64(stmt, 31, id) else _ = c.sqlite3_bind_null(stmt, 31);
     if (review_exclusion_id) |id|
         _ = c.sqlite3_bind_int64(stmt, 30, id)
     else
@@ -402,7 +414,7 @@ pub fn staffAnticheatJson(self: *Store, allocator: std.mem.Allocator) ![]u8 {
     const suppressed_pending = c.sqlite3_column_int64(pending_stmt, 1);
 
     var stmt: ?*c.sqlite3_stmt = null;
-    const sql = "SELECT o.id,o.user_id,u.name,coalesce(o.score_id,0),o.source,o.module,o.action,o.sample_weight,o.reason,o.risk_score,o.confidence_bps,o.evidence,o.decision_flags,o.rule_revision,o.objects_checked,o.matched_clicks,o.mean_abs_timing_error_milli,o.timing_stddev_milli,o.exact_timing_bps,o.center_hits_bps,o.mean_center_distance_milli,o.snap_events,o.replay_match_count,o.key_press_count,o.key_hold_count,o.mean_hold_duration_milli,o.hold_duration_stddev_milli,o.alternation_bps,o.target_distance_stddev_milli,o.velocity_spike_count,o.movement_velocity_stddev_milli,o.review_label,coalesce(reviewer.name,''),o.review_note,coalesce(o.reviewed_at,0),o.created_at,coalesce(x.id,0),coalesce(x.scope,''),coalesce(x.reason,''),coalesce(creator.name,''),coalesce(x.created_at,0),coalesce(x.expires_at,0),coalesce(revoker.name,''),coalesce(x.revoked_at,0),coalesce(x.revoke_reason,'') FROM anticheat_observations o JOIN users u ON u.id=o.user_id LEFT JOIN users reviewer ON reviewer.id=o.reviewer_id LEFT JOIN anticheat_review_exclusions x ON x.id=o.review_exclusion_id LEFT JOIN users creator ON creator.id=x.created_by LEFT JOIN users revoker ON revoker.id=x.revoked_by WHERE o.id IN(SELECT id FROM anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM anticheat_observations WHERE review_label!='pending' ORDER BY created_at DESC,id DESC LIMIT 250) ORDER BY (o.review_label='pending' AND o.review_exclusion_id IS NULL) DESC,(o.review_label='pending' AND o.review_exclusion_id IS NOT NULL) DESC,o.created_at DESC,o.id DESC";
+    const sql = "SELECT o.id,o.user_id,u.name,coalesce(o.score_id,o.lazer_score_id,0),o.source,o.module,o.action,o.sample_weight,o.reason,o.risk_score,o.confidence_bps,o.evidence,o.decision_flags,o.rule_revision,o.objects_checked,o.matched_clicks,o.mean_abs_timing_error_milli,o.timing_stddev_milli,o.exact_timing_bps,o.center_hits_bps,o.mean_center_distance_milli,o.snap_events,o.replay_match_count,o.key_press_count,o.key_hold_count,o.mean_hold_duration_milli,o.hold_duration_stddev_milli,o.alternation_bps,o.target_distance_stddev_milli,o.velocity_spike_count,o.movement_velocity_stddev_milli,o.review_label,coalesce(reviewer.name,''),o.review_note,coalesce(o.reviewed_at,0),o.created_at,coalesce(x.id,0),coalesce(x.scope,''),coalesce(x.reason,''),coalesce(creator.name,''),coalesce(x.created_at,0),coalesce(x.expires_at,0),coalesce(revoker.name,''),coalesce(x.revoked_at,0),coalesce(x.revoke_reason,'') FROM anticheat_observations o JOIN users u ON u.id=o.user_id LEFT JOIN users reviewer ON reviewer.id=o.reviewer_id LEFT JOIN anticheat_review_exclusions x ON x.id=o.review_exclusion_id LEFT JOIN users creator ON creator.id=x.created_by LEFT JOIN users revoker ON revoker.id=x.revoked_by WHERE o.id IN(SELECT id FROM anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM anticheat_observations WHERE review_label!='pending' ORDER BY created_at DESC,id DESC LIMIT 250) ORDER BY (o.review_label='pending' AND o.review_exclusion_id IS NULL) DESC,(o.review_label='pending' AND o.review_exclusion_id IS NOT NULL) DESC,o.created_at DESC,o.id DESC";
     if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(stmt);
     var output: std.Io.Writer.Allocating = .init(allocator);
@@ -411,7 +423,7 @@ pub fn staffAnticheatJson(self: *Store, allocator: std.mem.Allocator) ![]u8 {
     try anticheat_review.writePolicyJson(&output.writer);
     try output.writer.writeAll(",\"exclusions\":[");
     var exclusions: ?*c.sqlite3_stmt = null;
-    if (c.sqlite3_prepare_v2(self.db, "SELECT x.id,x.user_id,u.name,x.scope,x.reason,creator.name,x.created_at,x.expires_at,coalesce(revoker.name,''),coalesce(x.revoked_at,0),x.revoke_reason,(x.revoked_at IS NULL AND x.expires_at>unixepoch()) FROM anticheat_review_exclusions x JOIN users u ON u.id=x.user_id JOIN users creator ON creator.id=x.created_by LEFT JOIN users revoker ON revoker.id=x.revoked_by WHERE x.id IN(SELECT id FROM anticheat_review_exclusions WHERE revoked_at IS NULL AND expires_at>unixepoch() ORDER BY created_at DESC,id DESC LIMIT 200) OR x.id IN(SELECT id FROM anticheat_review_exclusions WHERE revoked_at IS NOT NULL OR expires_at<=unixepoch() ORDER BY created_at DESC,id DESC LIMIT 200) ORDER BY (x.revoked_at IS NULL AND x.expires_at>unixepoch()) DESC,x.created_at DESC,x.id DESC", -1, &exclusions, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    if (c.sqlite3_prepare_v2(self.db, "SELECT x.id,x.user_id,u.name,x.scope,x.reason,creator.name,x.created_at,x.expires_at,coalesce(revoker.name,''),coalesce(x.revoked_at,0),x.revoke_reason,(x.revoked_at IS NULL AND x.expires_at>unixepoch()),x.skip_checks FROM anticheat_review_exclusions x JOIN users u ON u.id=x.user_id JOIN users creator ON creator.id=x.created_by LEFT JOIN users revoker ON revoker.id=x.revoked_by WHERE x.id IN(SELECT id FROM anticheat_review_exclusions WHERE revoked_at IS NULL AND expires_at>unixepoch() ORDER BY created_at DESC,id DESC LIMIT 200) OR x.id IN(SELECT id FROM anticheat_review_exclusions WHERE revoked_at IS NOT NULL OR expires_at<=unixepoch() ORDER BY created_at DESC,id DESC LIMIT 200) ORDER BY (x.revoked_at IS NULL AND x.expires_at>unixepoch()) DESC,x.created_at DESC,x.id DESC", -1, &exclusions, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
     defer _ = c.sqlite3_finalize(exclusions);
     var first_exclusion = true;
     while (c.sqlite3_step(exclusions) == c.SQLITE_ROW) {
@@ -429,7 +441,7 @@ pub fn staffAnticheatJson(self: *Store, allocator: std.mem.Allocator) ![]u8 {
         try jsonString(&output.writer, std.mem.span(c.sqlite3_column_text(exclusions, 8)));
         try output.writer.print(",\"revoked_at\":{d},\"revoke_reason\":", .{c.sqlite3_column_int64(exclusions, 9)});
         try jsonString(&output.writer, std.mem.span(c.sqlite3_column_text(exclusions, 10)));
-        try output.writer.print(",\"active\":{}}}", .{c.sqlite3_column_int(exclusions, 11) != 0});
+        try output.writer.print(",\"active\":{},\"skip_checks\":{}}}", .{ c.sqlite3_column_int(exclusions, 11) != 0, c.sqlite3_column_int(exclusions, 12) != 0 });
     }
     try output.writer.writeAll("],\"observations\":[");
     var first = true;
@@ -535,4 +547,36 @@ pub fn reviewAnticheatObservation(self: *Store, actor_id: i32, observation_id: i
     const detail = try std.fmt.bufPrint(&detail_buf, "observation_id={d} label={s} note={s}", .{ observation_id, label_text, trimmed });
     try self.insertAuditLocked(actor_id, "anticheat.review", user_id, detail);
     try self.exec("COMMIT");
+}
+
+pub fn anticheatChecksExcluded(self: *Store, user_id: i32, source: @import("../../contracts.zig").AnticheatSource) !bool {
+    self.mutex.lockUncancelable(self.io);
+    defer self.mutex.unlock(self.io);
+    var stmt: ?*c.sqlite3_stmt = null;
+    if (c.sqlite3_prepare_v2(self.db, "SELECT 1 FROM anticheat_review_exclusions WHERE user_id=?1 AND skip_checks=1 AND revoked_at IS NULL AND expires_at>unixepoch() AND (scope='all' OR scope=?2) LIMIT 1", -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    defer _ = c.sqlite3_finalize(stmt);
+    _ = c.sqlite3_bind_int(stmt, 1, user_id);
+    const text = source.text();
+    _ = c.sqlite3_bind_text(stmt, 2, text.ptr, @intCast(text.len), null);
+    return switch (c.sqlite3_step(stmt)) {
+        c.SQLITE_ROW => true,
+        c.SQLITE_DONE => false,
+        else => error.DatabaseQueryFailed,
+    };
+}
+
+pub fn crossAccountReplayMatchesForMap(self: *Store, user_id: i32, map_md5: []const u8, mode: u8, digest: *const [32]u8) !u32 {
+    if (user_id <= 0 or map_md5.len != 32 or mode > 3) return error.InvalidReplayFingerprint;
+    self.mutex.lockUncancelable(self.io);
+    defer self.mutex.unlock(self.io);
+    var stmt: ?*c.sqlite3_stmt = null;
+    const sql = "SELECT count(DISTINCT fp.user_id) FROM anticheat_replay_fingerprints fp JOIN scores score ON score.id=fp.score_id WHERE fp.replay_sha256=?1 AND fp.user_id!=?2 AND fp.user_id!=3 AND score.passed=1 AND score.map_md5=?3 AND score.mode=?4";
+    if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    defer _ = c.sqlite3_finalize(stmt);
+    _ = c.sqlite3_bind_blob(stmt, 1, digest, digest.len, null);
+    _ = c.sqlite3_bind_int(stmt, 2, user_id);
+    _ = c.sqlite3_bind_text(stmt, 3, map_md5.ptr, @intCast(map_md5.len), null);
+    _ = c.sqlite3_bind_int(stmt, 4, mode);
+    if (c.sqlite3_step(stmt) != c.SQLITE_ROW) return error.DatabaseQueryFailed;
+    return @intCast(@min(@as(i64, 100_000), c.sqlite3_column_int64(stmt, 0)));
 }

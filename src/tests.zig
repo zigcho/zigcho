@@ -91,6 +91,9 @@ comptime {
     _ = anticheat_evidence;
     _ = anticheat_plugin;
     _ = anticheat_replay;
+    _ = @import("anticheat_lazer_replay.zig");
+    _ = @import("anticheat_policy.zig");
+    _ = @import("storage/tests/anticheat_checks.zig");
     _ = anticheat_review;
     _ = achievements;
     _ = pp_admin;
@@ -792,6 +795,8 @@ test "anticheat observations stay structured reviewable and non enforcing" {
     var replay_digest: [32]u8 = undefined;
     std.crypto.hash.sha2.Sha256.hash("identical compressed replay", &replay_digest, .{});
     try store.recordReplayFingerprint(player_id, 42, &replay_digest);
+    try std.testing.expectEqual(@as(u32, 1), try store.crossAccountReplayMatchesForMap(reviewer_id, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0, &replay_digest));
+    try std.testing.expectEqual(@as(u32, 0), try store.crossAccountReplayMatchesForMap(player_id, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", 0, &replay_digest));
     try std.testing.expectEqual(@as(u32, 0), try store.crossAccountReplayMatches(player_id, &replay_digest));
     try std.testing.expectEqual(@as(u32, 0), try store.crossAccountReplayMatches(reviewer_id, &replay_digest));
     try store.recordReplayFingerprint(reviewer_id, 44, &replay_digest);

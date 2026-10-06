@@ -1,5 +1,23 @@
 # zigcho
 
+## anticheat
+
+Stable and lazer replay submissions feed the private detector. lazer uploads
+are decoded as full replay files and checked against the resolved beatmap; custom
+mod settings stay out of behavioural rules the current detector cannot model.
+the staff anticheat panel keeps the two score sources separate.
+
+player exclusions now have two explicit effects: hide review keeps collecting
+evidence, while skip checks bypasses anticheat analysis for that player until the
+record expires or is revoked. old exclusions remain review-only. every change
+needs an administrator, a reason and an expiry; auth and score-token validation
+are never bypassed.
+
+`anticheat_enforce_integrity=true` rejects malformed passed replays and verifiable
+score-integrity failures before they affect stats or boards. it does not turn
+behavioural suspicions into automatic bans. the staff panel shows whether that
+switch is actually on and whether the private module loaded.
+
 an osu! server written in Zig. i wanted one server i could actually understand, change and run properly without treating the production work as somebody else's problem.
 
 release 1 is the point where Stable, zigcho!lazer and the website became one thing. they use the same local account, user id, moderation state, presence and shared player stats. none of it uses an official osu! account. their scoreboards stay separate where the clients genuinely score differently.

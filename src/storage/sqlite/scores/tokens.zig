@@ -9,6 +9,24 @@ const lazer_room_score_token_payload_mask = @import("../../../storage.zig").Stor
 
 pub const isLazerRoomScoreToken = @import("../../contracts.zig").isLazerRoomScoreToken;
 
+// This never consumes a token. Submission repeats auth in its transaction.
+pub fn lazerScoreTokenReady(self: *Store, user_id: i32, beatmap_id: i32, token_id: i64, ruleset: i64) !bool {
+    self.mutex.lockUncancelable(self.io);
+    defer self.mutex.unlock(self.io);
+    var stmt: ?*c.sqlite3_stmt = null;
+    if (c.sqlite3_prepare_v2(self.db, "SELECT 1 FROM lazer_score_tokens WHERE id=?1 AND user_id=?2 AND beatmap_id=?3 AND ruleset_id=?4 AND consumed_at IS NULL AND expires_at>unixepoch()", -1, &stmt, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+    defer _ = c.sqlite3_finalize(stmt);
+    _ = c.sqlite3_bind_int64(stmt, 1, token_id);
+    _ = c.sqlite3_bind_int(stmt, 2, user_id);
+    _ = c.sqlite3_bind_int(stmt, 3, beatmap_id);
+    _ = c.sqlite3_bind_int64(stmt, 4, ruleset);
+    return switch (c.sqlite3_step(stmt)) {
+        c.SQLITE_ROW => true,
+        c.SQLITE_DONE => false,
+        else => error.DatabaseQueryFailed,
+    };
+}
+
 pub fn createLazerScoreToken(self: *Store, user_id: i32, beatmap_id: i32, beatmap_hash: []const u8, ruleset_id: i64, version_hash: []const u8) !i64 {
     return self.createLazerScoreTokenScoped(user_id, beatmap_id, beatmap_hash, ruleset_id, version_hash, false);
 }

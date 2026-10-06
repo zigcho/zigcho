@@ -155,6 +155,13 @@ pub fn migrate(self: *Store) !void {
         else
             try self.exec(database_sql.sqliteMigration(47));
     }
+    if (version < 48) {
+        var shape: ?*c.sqlite3_stmt = null;
+        if (c.sqlite3_prepare_v2(self.db, "SELECT (SELECT count(*) FROM pragma_table_info('anticheat_review_exclusions') WHERE name='skip_checks')+(SELECT count(*) FROM pragma_table_info('anticheat_observations') WHERE name='lazer_score_id')", -1, &shape, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+        const present = c.sqlite3_step(shape) == c.SQLITE_ROW and c.sqlite3_column_int(shape, 0) == 2;
+        _ = c.sqlite3_finalize(shape);
+        if (present) try self.exec("PRAGMA user_version=48") else try self.exec(database_sql.sqliteMigration(48));
+    }
     try self.backfillLazerClassicScores();
     try self.exec("DELETE FROM user_stats_history WHERE day<((unixepoch()/86400)-89)*86400");
     try self.exec(

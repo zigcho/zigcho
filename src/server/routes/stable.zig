@@ -565,8 +565,21 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         score.achievement_stars = performance.stars;
         const elapsed_ms = if (score.passed) score_time else fail_time;
         var replay_digest: [32]u8 = undefined;
-        const has_replay_fingerprint = replay.data.len != 0;
+        const has_replay_fingerprint = replay.data.len != 0 and !self.anticheatChecksExcluded(user.id, .stable_score);
         if (has_replay_fingerprint) std.crypto.hash.sha2.Sha256.hash(replay.data, &replay_digest, .{});
+        const pre_match_count = if (has_replay_fingerprint and score.passed) self.store.crossAccountReplayMatchesForMap(user.id, score.map_md5, score.mode, &replay_digest) catch 0 else 0;
+        const observation_before_insert = self.observeStableGameplay(user.id, score, replay.data, map_file, performance, elapsed_ms, pre_match_count);
+        if (self.anticheat_enforce_integrity and score.passed) switch (observation_before_insert) {
+            .invalid_replay => {
+                self.persistHostAnticheatObservation(user.id, .stable_score, null, anticheat_evidence.stableReplay(.invalid_payload, 0));
+                return rejectStableScore(req, "invalid_replay", body.len);
+            },
+            .result => |value| if (@import("../../anticheat_policy.zig").rejectScore(true, true, value.result.decision)) {
+                self.persistGameplayObservation(user.id, .stable_score, null, 1, value.evidence, pre_match_count, value.result);
+                return rejectStableScore(req, "anticheat_score_integrity", body.len);
+            },
+            .none => {},
+        };
         const stats_mode = stable_score.statsMode(score.mode, score.mods) orelse return respond(req, .ok, "text/plain", "error: no", &.{});
         const before_stats = (try self.store.statsForUser(user.id, stats_mode)) orelse domain.Stats{};
         const inserted_score = self.store.insertStableScoreWithChart(user.id, score, performance.pp, replay.data, elapsed_ms) catch |err| {
@@ -583,11 +596,8 @@ fn dispatch(self: anytype, req: *std.http.Server.Request, ctx: *const Context) !
         if (has_replay_fingerprint) self.store.recordReplayFingerprint(user.id, score_id, &replay_digest) catch |err| {
             std.log.warn("event=anticheat_replay_fingerprint_write_failed score_id={d} error={t}", .{ score_id, err });
         };
-        const replay_match_count = if (has_replay_fingerprint) self.store.crossAccountReplayMatches(user.id, &replay_digest) catch |err| blk: {
-            std.log.warn("event=anticheat_replay_match_lookup_failed user_id={d} error={t}", .{ user.id, err });
-            break :blk 0;
-        } else 0;
-        switch (self.observeStableGameplay(user.id, score, replay.data, map_file, performance, elapsed_ms, replay_match_count)) {
+        const replay_match_count = pre_match_count;
+        switch (observation_before_insert) {
             .none => {},
             .invalid_replay => self.persistHostAnticheatObservation(user.id, .stable_score, score_id, anticheat_evidence.stableReplay(.invalid_payload, replay_match_count)),
             .result => |observation| {
