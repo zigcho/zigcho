@@ -242,7 +242,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
     }
     if (observation.score_id == null and observation.lazer_score_id == null) {
         var existing: ?*c.sqlite3_stmt = null;
-        const existing_sql = "SELECT id FROM anticheat_observations WHERE user_id=?1 AND score_id IS NULL AND review_label='pending' AND source=?3 AND module=?4 AND action=?5 AND sample_weight=?6 AND reason=?7 AND risk_score=?8 AND confidence_bps=?9 AND evidence=?10 AND decision_flags=?11 AND rule_revision=?12 AND objects_checked=?13 AND matched_clicks=?14 AND mean_abs_timing_error_milli=?15 AND timing_stddev_milli=?16 AND exact_timing_bps=?17 AND center_hits_bps=?18 AND mean_center_distance_milli=?19 AND snap_events=?20 AND replay_match_count=?21 AND key_press_count=?22 AND key_hold_count=?23 AND mean_hold_duration_milli=?24 AND hold_duration_stddev_milli=?25 AND alternation_bps=?26 AND target_distance_stddev_milli=?27 AND velocity_spike_count=?28 AND movement_velocity_stddev_milli=?29 AND coalesce(review_exclusion_id,0)=?30 AND enforced=?32 AND created_at>=unixepoch()-86400 ORDER BY id DESC LIMIT 1";
+        const existing_sql = "SELECT id FROM anticheat_observations WHERE user_id=?1 AND score_id IS NULL AND lazer_score_id IS NULL AND review_label='pending' AND source=?3 AND module=?4 AND action=?5 AND sample_weight=?6 AND reason=?7 AND risk_score=?8 AND confidence_bps=?9 AND evidence=?10 AND decision_flags=?11 AND rule_revision=?12 AND objects_checked=?13 AND matched_clicks=?14 AND mean_abs_timing_error_milli=?15 AND timing_stddev_milli=?16 AND exact_timing_bps=?17 AND center_hits_bps=?18 AND mean_center_distance_milli=?19 AND snap_events=?20 AND replay_match_count=?21 AND key_press_count=?22 AND key_hold_count=?23 AND mean_hold_duration_milli=?24 AND hold_duration_stddev_milli=?25 AND alternation_bps=?26 AND target_distance_stddev_milli=?27 AND velocity_spike_count=?28 AND movement_velocity_stddev_milli=?29 AND coalesce(review_exclusion_id,0)=?30 AND enforced=?32 AND created_at>=unixepoch()-86400 ORDER BY id DESC LIMIT 1";
         if (c.sqlite3_prepare_v2(self.db, existing_sql, -1, &existing, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
         defer _ = c.sqlite3_finalize(existing);
         _ = c.sqlite3_bind_int(existing, 1, user_id);
@@ -327,11 +327,12 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
     if (c.sqlite3_step(stmt) != c.SQLITE_DONE) return error.DatabaseQueryFailed;
     const observation_id = c.sqlite3_last_insert_rowid(self.db);
     var detail_buf: [560]u8 = undefined;
-    const detail = try std.fmt.bufPrint(&detail_buf, "observation_id={d} module={s} source={s} score_id={d} mode=observe action={d} sample_weight={d} reason={d} risk={d} confidence_bps={d} evidence={d} replay_match_count={d} rule_revision={d} review_exclusion_id={d}", .{
+    const detail = try std.fmt.bufPrint(&detail_buf, "observation_id={d} module={s} source={s} score_id={d} mode={s} action={d} sample_weight={d} reason={d} risk={d} confidence_bps={d} evidence={d} replay_match_count={d} rule_revision={d} review_exclusion_id={d}", .{
         observation_id,
         observation.module,
         source,
-        observation.score_id orelse 0,
+        observation.score_id orelse observation.lazer_score_id orelse 0,
+        if (observation.enforced) "integrity" else "observe",
         observation.action,
         observation.sample_weight,
         observation.reason,
@@ -342,7 +343,7 @@ pub fn recordAnticheatObservation(self: *Store, user_id: i32, observation: Antic
         observation.rule_revision,
         review_exclusion_id orelse 0,
     });
-    try self.insertAuditLocked(3, "anticheat.observe", user_id, detail);
+    try self.insertAuditLocked(3, if (observation.enforced) "anticheat.reject" else "anticheat.observe", user_id, detail);
     try self.exec("COMMIT");
     return observation_id;
 }

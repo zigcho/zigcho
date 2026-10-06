@@ -61,4 +61,26 @@ test "applied integrity rejections do not coalesce into old observe-only finding
     defer std.testing.allocator.free(json);
     try std.testing.expect(std.mem.indexOf(u8, json, "\"enforced\":true") != null);
     try std.testing.expect(std.mem.indexOf(u8, json, "score rejected before persistence") != null);
+    const audit = try store.staffAuditJson(std.testing.allocator);
+    defer std.testing.allocator.free(audit);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "anticheat.reject") != null);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "mode=integrity") != null);
+}
+
+test "score-less lazer findings never coalesce into persisted score evidence" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var buf: [512]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&buf, ".zig-cache/tmp/{s}/lazer-evidence.db", .{tmp.sub_path});
+    var store = try storage.Store.open(std.testing.allocator, std.testing.io, path);
+    defer store.close();
+    try store.migrate();
+    const player = try store.register("lazer evidence", "lazer-evidence@example.invalid", "00000000000000000000000000000000");
+    try store.exec(try std.fmt.bufPrintZ(&buf, "INSERT INTO lazer_scores(id,user_id,beatmap_id,ruleset_id,total_score,total_score_without_mods,accuracy,max_combo,passed,mods_json,statistics_json,rank_namespace) VALUES(42,{d},75,0,100,100,1.0,10,1,'[]','{{}}','vanilla')", .{player}));
+    var observation: storage.AnticheatObservation = .{ .source = .lazer_score, .lazer_score_id = 42, .module = "fixture", .action = 1, .reason = 2008, .risk_score = 500, .confidence_bps = 8000 };
+    const attached = try store.recordAnticheatObservation(player, observation);
+    observation.lazer_score_id = null;
+    const unattached = try store.recordAnticheatObservation(player, observation);
+    try std.testing.expect(attached != unattached);
+    try std.testing.expectEqual(unattached, try store.recordAnticheatObservation(player, observation));
 }

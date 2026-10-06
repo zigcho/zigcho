@@ -168,7 +168,7 @@ pub fn recordAnticheatObservation(self: anytype, user_id: i32, observation: Anti
     params[29] = if (active_exclusion.rows() == 0) null else try common.param(&buffers, &cursor, try active_exclusion.int(i64, 0, 0));
     if (observation.score_id == null and observation.lazer_score_id == null) {
         const coalesce_params = [_]?[]const u8{ params[0], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9], params[10], params[11], params[12], params[13], params[14], params[15], params[16], params[17], params[18], params[19], params[20], params[21], params[22], params[23], params[24], params[25], params[26], params[27], params[28], params[29], if (observation.enforced) "true" else "false" };
-        var existing = try postgres.queryParams(self.allocator, lease.conn, "SELECT id FROM zigcho.anticheat_observations WHERE user_id=$1 AND score_id IS NULL AND review_label='pending' AND source=$2 AND module=$3 AND action=$4 AND sample_weight=$5 AND reason=$6 AND risk_score=$7 AND confidence_bps=$8 AND evidence=$9 AND decision_flags=$10 AND rule_revision=$11 AND objects_checked=$12 AND matched_clicks=$13 AND mean_abs_timing_error_milli=$14 AND timing_stddev_milli=$15 AND exact_timing_bps=$16 AND center_hits_bps=$17 AND mean_center_distance_milli=$18 AND snap_events=$19 AND replay_match_count=$20 AND key_press_count=$21 AND key_hold_count=$22 AND mean_hold_duration_milli=$23 AND hold_duration_stddev_milli=$24 AND alternation_bps=$25 AND target_distance_stddev_milli=$26 AND velocity_spike_count=$27 AND movement_velocity_stddev_milli=$28 AND coalesce(review_exclusion_id,0)=coalesce($29::bigint,0) AND enforced=$30::boolean AND created_at>=extract(epoch FROM clock_timestamp())::bigint-86400 ORDER BY id DESC LIMIT 1", &coalesce_params);
+        var existing = try postgres.queryParams(self.allocator, lease.conn, "SELECT id FROM zigcho.anticheat_observations WHERE user_id=$1 AND score_id IS NULL AND lazer_score_id IS NULL AND review_label='pending' AND source=$2 AND module=$3 AND action=$4 AND sample_weight=$5 AND reason=$6 AND risk_score=$7 AND confidence_bps=$8 AND evidence=$9 AND decision_flags=$10 AND rule_revision=$11 AND objects_checked=$12 AND matched_clicks=$13 AND mean_abs_timing_error_milli=$14 AND timing_stddev_milli=$15 AND exact_timing_bps=$16 AND center_hits_bps=$17 AND mean_center_distance_milli=$18 AND snap_events=$19 AND replay_match_count=$20 AND key_press_count=$21 AND key_hold_count=$22 AND mean_hold_duration_milli=$23 AND hold_duration_stddev_milli=$24 AND alternation_bps=$25 AND target_distance_stddev_milli=$26 AND velocity_spike_count=$27 AND movement_velocity_stddev_milli=$28 AND coalesce(review_exclusion_id,0)=coalesce($29::bigint,0) AND enforced=$30::boolean AND created_at>=extract(epoch FROM clock_timestamp())::bigint-86400 ORDER BY id DESC LIMIT 1", &coalesce_params);
         defer existing.deinit();
         if (existing.rows() != 0) {
             const observation_id = try existing.int(i64, 0, 0);
@@ -182,11 +182,12 @@ pub fn recordAnticheatObservation(self: anytype, user_id: i32, observation: Anti
     defer result.deinit();
     const observation_id = try result.int(i64, 0, 0);
     var detail_buf: [560]u8 = undefined;
-    const detail = try std.fmt.bufPrint(&detail_buf, "observation_id={d} module={s} source={s} score_id={d} mode=observe action={d} sample_weight={d} reason={d} risk={d} confidence_bps={d} evidence={d} replay_match_count={d} rule_revision={d} review_exclusion_id={s}", .{
+    const detail = try std.fmt.bufPrint(&detail_buf, "observation_id={d} module={s} source={s} score_id={d} mode={s} action={d} sample_weight={d} reason={d} risk={d} confidence_bps={d} evidence={d} replay_match_count={d} rule_revision={d} review_exclusion_id={s}", .{
         observation_id,
         observation.module,
         observation.source.text(),
-        observation.score_id orelse 0,
+        observation.score_id orelse observation.lazer_score_id orelse 0,
+        if (observation.enforced) "integrity" else "observe",
         observation.action,
         observation.sample_weight,
         observation.reason,
@@ -197,7 +198,7 @@ pub fn recordAnticheatObservation(self: anytype, user_id: i32, observation: Anti
         observation.rule_revision,
         params[29] orelse "0",
     });
-    try common.insertAudit(self.allocator, lease.conn, 3, "anticheat.observe", user_id, detail);
+    try common.insertAudit(self.allocator, lease.conn, 3, if (observation.enforced) "anticheat.reject" else "anticheat.observe", user_id, detail);
     try postgres.exec(lease.conn, "COMMIT");
     return observation_id;
 }

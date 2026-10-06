@@ -2401,6 +2401,66 @@ test "postgres anticheat review exclusions preserve evidence and audit history" 
     try std.testing.expect(std.mem.indexOf(u8, json, "postgres calibration complete") != null);
 }
 
+test "postgres check exemptions and native lazer evidence remain separate" {
+    const raw_conninfo = std.c.getenv("ZIGCHO_TEST_POSTGRES_STORE_URL") orelse return error.SkipZigTest;
+    var store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));
+    defer store.close();
+    try store.migrate();
+    const admin = try store.register("pg checks admin", "pg-checks-admin@example.test", "22222222222222222222222222222222");
+    const player = try store.register("pg checks player", "pg-checks-player@example.test", "33333333333333333333333333333333");
+    var buffers: [2][32]u8 = undefined;
+    const admin_text = try std.fmt.bufPrint(&buffers[0], "{d}", .{admin});
+    const player_text = try std.fmt.bufPrint(&buffers[1], "{d}", .{player});
+    var score_id: i64 = undefined;
+    {
+        var lease = store.pool.acquire();
+        defer lease.release();
+        var grant = try postgres.queryParams(std.testing.allocator, lease.conn, "UPDATE zigcho.users SET privileges=privileges|(1<<13) WHERE id=$1", &.{admin_text});
+        grant.deinit();
+        try postgres.exec(lease.conn, "INSERT INTO zigcho.beatmaps(id,set_id,md5,artist,title,version,creator,status) VALUES(1900000500,1900000500,'00000000000000000000000000000500','fixture','fixture','fixture','fixture',3)");
+        var inserted = try postgres.queryParams(std.testing.allocator, lease.conn, "INSERT INTO zigcho.lazer_scores(user_id,beatmap_id,ruleset_id,total_score,total_score_without_mods,accuracy,max_combo,passed,mods_json,statistics_json,rank_namespace) VALUES($1,1900000500,0,100,100,1.0,10,true,'[]'::jsonb,'{}'::jsonb,'vanilla') RETURNING id", &.{player_text});
+        defer inserted.deinit();
+        score_id = try inserted.int(i64, 0, 0);
+    }
+    _ = try store.createAnticheatExclusion(admin, player, .all, 3600, "review-only calibration");
+    try std.testing.expect(!try store.anticheatChecksExcluded(player, .lazer_score));
+    const stable = try store.createAnticheatCheckExclusion(admin, player, .stable_score, 3600, "stable-only calibration");
+    try std.testing.expect(try store.anticheatChecksExcluded(player, .stable_score));
+    try std.testing.expect(!try store.anticheatChecksExcluded(player, .lazer_score));
+    try std.testing.expectError(error.AnticheatExclusionOverlap, store.createAnticheatCheckExclusion(admin, player, .all, 3600, "overlapping checks"));
+    try store.revokeAnticheatExclusion(admin, stable, "resume stable checks");
+    try std.testing.expect(!try store.anticheatChecksExcluded(player, .stable_score));
+    const all = try store.createAnticheatCheckExclusion(admin, player, .all, 3600, "both client calibration");
+    try std.testing.expect(try store.anticheatChecksExcluded(player, .lazer_score));
+    {
+        var id_buf: [32]u8 = undefined;
+        const id = try std.fmt.bufPrint(&id_buf, "{d}", .{all});
+        var lease = store.pool.acquire();
+        defer lease.release();
+        var expiry = try postgres.queryParams(std.testing.allocator, lease.conn, "UPDATE zigcho.anticheat_review_exclusions SET created_at=1,expires_at=3601 WHERE id=$1", &.{id});
+        expiry.deinit();
+    }
+    try std.testing.expect(!try store.anticheatChecksExcluded(player, .lazer_score));
+    var observation: AnticheatObservation = .{ .source = .lazer_score, .lazer_score_id = score_id, .module = "pg-native-fixture", .action = 1, .reason = 2008, .risk_score = 500, .confidence_bps = 8000 };
+    const attached = try store.recordAnticheatObservation(player, observation);
+    observation.lazer_score_id = null;
+    const unattached = try store.recordAnticheatObservation(player, observation);
+    try std.testing.expect(attached != unattached);
+    try std.testing.expectEqual(unattached, try store.recordAnticheatObservation(player, observation));
+    observation.enforced = true;
+    const rejected = try store.recordAnticheatObservation(player, observation);
+    try std.testing.expect(rejected != unattached);
+    try std.testing.expectEqual(rejected, try store.recordAnticheatObservation(player, observation));
+    const json = try store.staffAnticheatJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"skip_checks\":true") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"enforced\":true") != null);
+    const audit = try store.staffAuditJson(std.testing.allocator);
+    defer std.testing.allocator.free(audit);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "anticheat.reject") != null);
+    try std.testing.expect(std.mem.indexOf(u8, audit, "mode=integrity") != null);
+}
+
 test "postgres anticheat hardware and flags stay review only" {
     const raw_conninfo = std.c.getenv("ZIGCHO_TEST_POSTGRES_STORE_URL") orelse return error.SkipZigTest;
     var store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));
