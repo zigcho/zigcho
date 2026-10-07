@@ -67,7 +67,7 @@ export function createReplayPpCounter(stage, session, score) {
     }
   };
   const stopWorker = () => { clearTimeout(timer); worker?.terminate(); worker = null; };
-  const fallback = () => { stopWorker(); paint(null, 'live pp unavailable'); };
+  const fallback = () => { stopWorker(); points = null; paint(null, 'live pp unavailable'); };
   let mods = session.replay.scoreInfo?.mods ?? session.replay.mods;
   if (typeof Worker !== 'function') fallback();
   else try {
