@@ -2,6 +2,20 @@
   "schema": 1,
   "builds": [
     {
+      "id": 70,
+      "version": "2026.1007.1",
+      "display_version": "web replay pp and a cleaner skin",
+      "created_at": "2026-10-07T09:00:00Z",
+      "updates": [
+        {
+          "name": "2026-10-07-web-replay-pp-and-skin.md",
+          "created_at": "2026-10-07T09:00:00Z",
+          "commit": "",
+          "sha256": "39233bd140a9b4dcb9dc8cb2cf74f02dbc672782c9e070c321a3ab1fae299aa3"
+        }
+      ]
+    },
+    {
       "id": 69,
       "version": "2026.1007.0",
       "display_version": "lazer replay score agreement",

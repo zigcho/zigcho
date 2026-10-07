@@ -16,6 +16,8 @@ ENV PATH=/usr/local/cargo/bin:$PATH \
     RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo
 
+RUN rustup target add wasm32-unknown-unknown
+
 RUN curl --fail --location --silent --show-error \
         "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
         --output /tmp/zig.tar.xz \

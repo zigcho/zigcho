@@ -45,6 +45,8 @@ the full release 1 notes are in [updates/2026-08-24-lazer-multiplayer-profiles-a
 
 ## build
 
+the replay counter also builds our PP bridge for the browser. install that Rust target once with `rustup target add wasm32-unknown-unknown`; the release runner already does it.
+
 zigcho is pinned to Zig 0.16.0. the PP bridge also needs Rust, SQLite 3 and PostgreSQL with libpq.
 
 ```sh

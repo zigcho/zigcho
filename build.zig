@@ -28,6 +28,12 @@ pub fn build(b: *std.Build) void {
     });
 
     const cargo = b.addSystemCommand(&.{ "cargo", "build", "--manifest-path", "pp/Cargo.toml", "--release", "--locked" });
+    const browser_pp = b.addSystemCommand(&.{ "cargo", "rustc", "--manifest-path", "pp/Cargo.toml", "--lib", "--release", "--locked", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib" });
+    browser_pp.setEnvironmentVariable("CARGO_PROFILE_RELEASE_PANIC", "abort");
+    const browser_files = b.addWriteFiles();
+    browser_files.step.dependOn(&browser_pp.step);
+    _ = browser_files.addCopyFile(b.path("pp/target/wasm32-unknown-unknown/release/zigcho_pp.wasm"), "zigcho_pp.wasm");
+    const browser_pp_mod = b.createModule(.{ .root_source_file = browser_files.add("replay_pp.zig", "pub const wasm = @embedFile(\"zigcho_pp.wasm\");\n") });
     const pp_library = b.path(if (target.result.os.tag == .windows) "pp/target/release/zigcho_pp.lib" else "pp/target/release/libzigcho_pp.a");
 
     const mod = b.createModule(.{
@@ -59,6 +65,7 @@ pub fn build(b: *std.Build) void {
     changelog_mod.addOptions("changelog_options", changelog_options);
     mod.addImport("changelog", changelog_mod);
     mod.addImport("database_sql", database_sql_mod);
+    mod.addImport("replay_pp", browser_pp_mod);
     const server_options = b.addOptions();
     server_options.addOption(bool, "postgres_runtime", postgres_runtime);
     mod.addOptions("build_options", server_options);
@@ -139,6 +146,7 @@ pub fn build(b: *std.Build) void {
     });
     test_mod.addImport("changelog", changelog_mod);
     test_mod.addImport("database_sql", database_sql_mod);
+    test_mod.addImport("replay_pp", browser_pp_mod);
     const test_options = b.addOptions();
     test_options.addOption(bool, "postgres_runtime", false);
     test_mod.addOptions("build_options", test_options);

@@ -1,0 +1,42 @@
+name: browser replay pp
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - pp/**
+      - src/web/replay-pp*.js
+      - tools/tests/replay-pp.test.mjs
+      - .github/workflows/replay-pp.yml
+
+permissions:
+  contents: read
+
+jobs:
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: install the pinned browser target
+        run: rustup toolchain install 1.94.1 --profile minimal --target wasm32-unknown-unknown
+      - name: build our existing calculators for the browser
+        run: CARGO_PROFILE_RELEASE_PANIC=abort cargo +1.94.1 rustc --locked --manifest-path pp/Cargo.toml --lib --release --target wasm32-unknown-unknown --crate-type cdylib
+      - name: check playback calculations
+        env:
+          REPLAY_PP_WASM: pp/target/wasm32-unknown-unknown/release/zigcho_pp.wasm
+        run: node --test tools/tests/replay-pp.test.mjs
+      - name: record the exact artifact
+        working-directory: pp/target/wasm32-unknown-unknown/release
+        run: sha256sum zigcho_pp.wasm > zigcho_pp.wasm.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: replay-pp-${{ github.sha }}
+          path: |
+            pp/target/wasm32-unknown-unknown/release/zigcho_pp.wasm
+            pp/target/wasm32-unknown-unknown/release/zigcho_pp.wasm.sha256
+          if-no-files-found: error
+          retention-days: 14

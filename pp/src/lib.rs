@@ -1,5 +1,8 @@
 use std::{panic::catch_unwind, slice};
 
+#[cfg(target_arch = "wasm32")]
+mod web;
+
 use akatsuki_pp::{
     Beatmap as AkatsukiBeatmap, Performance as AkatsukiPerformance,
     any::ScoreState as AkatsukiScoreState,

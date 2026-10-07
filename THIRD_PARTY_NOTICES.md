@@ -48,8 +48,14 @@ crate; Zigcho does not relicense them.
 the website bundles [`replayviewer-js` 1.0.0](https://github.com/daladal/replayviewer-js) in
 `src/web/vendor/replayviewer/` for local browser playback. its code is MIT,
 Copyright (c) 2026 bog; the complete notice is kept next to the bundled files.
-zigcho generates its own basic playback skin at runtime and does not ship the
+zigcho generates its own clean playback skin at runtime and does not ship the
 sample skin, sample maps or osu! resource assets from that project.
+
+the live replay PP counter runs the same pinned Rust bridge listed above, built
+to WebAssembly on GitHub runners. it reconstructs the score state at each point
+in playback; it does not change saved scores or replace Relax/AP with the
+vanilla calculator. the server embeds the browser binary built from that same
+source and lockfile; generated binaries are not committed.
 
 ## protocol references
 

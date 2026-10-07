@@ -1,4 +1,6 @@
-import { configureWorkers, parseReplay, loadSkinFromDir, buildSkin, createReplaySession } from '/assets/replayviewer.js';
+import { configureWorkers, parseReplay, buildSkin, createReplaySession } from '/assets/replayviewer.js';
+import { createReplayPpCounter } from '/assets/replay-pp.js';
+import { skinForReplay } from '/assets/replay-skin.js';
 
 configureWorkers({ stretch: '/assets/replayviewer-stretch-worker.js' });
 
@@ -7,90 +9,6 @@ let active = null;
 function timeLabel(ms) {
   const seconds = Math.max(0, Math.floor(ms / 1000));
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-}
-
-async function sprite(size, paint) {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
-  paint(canvas.getContext('2d'), size);
-  return createImageBitmap(canvas);
-}
-
-async function skinForReplay(audioContext) {
-  const skin = await loadSkinFromDir('/assets/replay-skin', audioContext);
-  skin.config.comboColors = ['#ed83b6', '#91d4e5', '#cbb3ff', '#f4d092'];
-  const circle = await sprite(128, (ctx, size) => {
-    ctx.fillStyle = '#fff';
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, 53, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, 45, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  const approach = await sprite(128, (ctx, size) => {
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, 59, 0, Math.PI * 2);
-    ctx.stroke();
-  });
-  const cursor = await sprite(128, (ctx, size) => {
-    const glow = ctx.createRadialGradient(64, 64, 3, 64, 64, 55);
-    glow.addColorStop(0, '#fff');
-    glow.addColorStop(.3, '#fff');
-    glow.addColorStop(.48, '#ffb6db');
-    glow.addColorStop(1, '#ff7fb000');
-    ctx.fillStyle = glow;
-    ctx.fillRect(0, 0, size, size);
-  });
-  const spinnerRing = await sprite(512, (ctx, size) => {
-    const centre = size / 2;
-    ctx.strokeStyle = '#f5dce9';
-    ctx.lineWidth = 10;
-    ctx.beginPath();
-    ctx.arc(centre, centre, 218, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.strokeStyle = '#ed83b6';
-    ctx.lineWidth = 20;
-    for (let tick = 0; tick < 24; tick++) {
-      const angle = tick * Math.PI / 12;
-      ctx.beginPath();
-      ctx.arc(centre, centre, 188, angle, angle + .14);
-      ctx.stroke();
-    }
-  });
-  const spinnerCore = await sprite(320, (ctx, size) => {
-    const centre = size / 2;
-    const fill = ctx.createRadialGradient(centre, centre, 0, centre, centre, 150);
-    fill.addColorStop(0, '#fff5fb');
-    fill.addColorStop(.24, '#ec8cbc');
-    fill.addColorStop(.72, '#6d3458');
-    fill.addColorStop(1, '#6d345800');
-    ctx.fillStyle = fill;
-    ctx.beginPath();
-    ctx.arc(centre, centre, 150, 0, Math.PI * 2);
-    ctx.fill();
-  });
-  const spinnerGlow = await sprite(512, (ctx, size) => {
-    const centre = size / 2;
-    const fill = ctx.createRadialGradient(centre, centre, 100, centre, centre, 245);
-    fill.addColorStop(0, '#ed83b600');
-    fill.addColorStop(.8, '#ed83b650');
-    fill.addColorStop(1, '#ed83b600');
-    ctx.fillStyle = fill;
-    ctx.fillRect(0, 0, size, size);
-  });
-  skin.images.set('hitcircle.png', circle);
-  skin.images.set('approachcircle.png', approach);
-  skin.images.set('sliderball.png', circle);
-  skin.images.set('cursor.png', cursor);
-  skin.images.set('spinner-circle.png', spinnerRing);
-  skin.images.set('spinner-approachcircle.png', spinnerRing);
-  skin.images.set('spinner-middle.png', spinnerCore);
-  skin.images.set('spinner-glow.png', spinnerGlow);
-  return skin;
 }
 
 async function getBytes(path, signal, limit) {
@@ -152,6 +70,7 @@ export async function openReplayPlayer(score, audioContext) {
   const speed = dialog.querySelector('.replay-player-speed');
   const volume = dialog.querySelector('.replay-player-volume input');
   let session = null;
+  let ppCounter = null;
   let ticker = 0;
   let closed = false;
   const fitCanvas = () => {
@@ -176,6 +95,7 @@ export async function openReplayPlayer(score, audioContext) {
     controller.abort();
     cancelAnimationFrame(ticker);
     layoutObserver.disconnect();
+    ppCounter?.destroy();
     session?.destroy();
     audioContext.close();
     if (active?.close === close) active = null;
@@ -225,6 +145,7 @@ export async function openReplayPlayer(score, audioContext) {
     session.audioSync.setEffectsVolume(.65);
     session.audioSync.setBeatmapHitsounds(true);
     session.renderer.start();
+    ppCounter = createReplayPpCounter(stage, session, score);
     session.player.setClockFn(session.audioSync.clockFn);
     seek.max = String(Math.max(1, Math.floor(session.player.durationMs)));
     toggle.disabled = seek.disabled = speed.disabled = volume.disabled = false;
@@ -234,6 +155,7 @@ export async function openReplayPlayer(score, audioContext) {
     const paintClock = () => {
       if (closed) return;
       const current = Math.min(session.player.durationMs, session.player.currentTimeMs);
+      ppCounter.update(current);
       if (document.activeElement !== seek) seek.value = String(Math.max(0, Math.floor(current)));
       clock.textContent = `${timeLabel(current)} / ${timeLabel(session.player.durationMs)}`;
       if (session.player.isPlaying && current >= session.player.durationMs - 50) {
