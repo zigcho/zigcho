@@ -110,7 +110,7 @@ pub const LazerGameplayObservation = union(enum) {
     missing_replay,
     score_mismatch,
     unavailable,
-    result: struct { result: anticheat_abi.GameplayResultV1, evidence: u64 },
+    result: struct { result: anticheat_abi.GameplayResultV2, evidence: u64 },
 };
 
 fn judgement(score: lazer.ScoreInput, name: []const u8) u32 {
@@ -195,7 +195,7 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
         .nmiss = judgement(score, "miss"),
         .map_objects = if (supported) prepared.map_object_count else 0,
     };
-    var result: anticheat_abi.GameplayResultV1 = .{};
+    var result: anticheat_abi.GameplayResultV2 = .{};
     if (supported) {
         result = host.evaluateGameplay(.{
             .base = base,
@@ -345,7 +345,7 @@ pub const StableGameplayObservation = union(enum) {
     none,
     invalid_replay,
     result: struct {
-        result: anticheat_abi.GameplayResultV1,
+        result: anticheat_abi.GameplayResultV2,
         evidence: u64,
         replay_content_digest: [32]u8,
         replay_content_match_count: u32,
@@ -359,7 +359,7 @@ fn cursorFamilyReason(reason: u32) bool {
         reason == anticheat_abi.Reason.aim_velocity_pattern;
 }
 
-pub fn gateUnreliableCursorEvidence(result: *anticheat_abi.GameplayResultV1) void {
+pub fn gateUnreliableCursorEvidence(result: *anticheat_abi.GameplayResultV2) void {
     if (cursorFamilyReason(result.decision.reason)) {
         const rule_revision = result.decision.rule_revision;
         result.decision = .{ .rule_revision = rule_revision };
@@ -461,19 +461,19 @@ pub fn observeStableGameplay(self: anytype, user_id: i32, score: stable_score.Su
     } };
 }
 
-pub fn persistAnticheatObservation(self: anytype, user_id: i32, score_id: i64, sample_weight: u32, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV1) void {
+pub fn persistAnticheatObservation(self: anytype, user_id: i32, score_id: i64, sample_weight: u32, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV2) void {
     persistGameplayObservation(self, user_id, .stable_score, score_id, sample_weight, evidence, replay_match_count, result);
 }
 
-pub fn persistGameplayObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, sample_weight: u32, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV1) void {
+pub fn persistGameplayObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, sample_weight: u32, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV2) void {
     persistGameplayObservationImpl(self, user_id, source, score_id, sample_weight, evidence, replay_match_count, result, false);
 }
 
-pub fn persistRejectedGameplayObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV1) void {
+pub fn persistRejectedGameplayObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV2) void {
     persistGameplayObservationImpl(self, user_id, source, null, 1, evidence, replay_match_count, result, true);
 }
 
-fn persistGameplayObservationImpl(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, sample_weight: u32, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV1, enforced: bool) void {
+fn persistGameplayObservationImpl(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, sample_weight: u32, evidence: u64, replay_match_count: u32, result: anticheat_abi.GameplayResultV2, enforced: bool) void {
     const host = if (self.anticheat) |*loaded| loaded else return;
     _ = self.store.recordAnticheatObservation(user_id, .{
         .source = source,
@@ -506,6 +506,7 @@ fn persistGameplayObservationImpl(self: anytype, user_id: i32, source: storage.A
         .target_distance_stddev_milli = result.target_distance_stddev_milli,
         .velocity_spike_count = result.velocity_spike_count,
         .movement_velocity_stddev_milli = result.movement_velocity_stddev_milli,
+        .input_basis = result.inputBasis(),
     }) catch |err| {
         std.log.warn("event=anticheat_observation_write_failed score_id={d} error={t}", .{ score_id orelse 0, err });
     };

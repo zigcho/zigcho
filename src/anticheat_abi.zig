@@ -1,5 +1,6 @@
+const std = @import("std");
 pub const version: u32 = 1;
-pub const rule_revision: u32 = 8;
+pub const rule_revision: u32 = 9;
 
 pub const Status = struct {
     pub const ok: u32 = 0;
@@ -214,4 +215,63 @@ pub const GameplayResultV1 = extern struct {
     velocity_spike_count: u32 = 0,
     movement_velocity_stddev_milli: u32 = 0,
     reserved: [2]u64 = [_]u64{0} ** 2,
+};
+pub const InputBasis = struct {
+    version: u32,
+    timing_samples: u32,
+    ambiguous_matched_presses: u32,
+    simultaneous_press_frames: u32,
+    alternation_opportunities: u32,
+};
+
+// Result v2 is separately negotiated. Event/decision v1 and every v1 reserved
+// word retain their old layout and meaning; none is silently repurposed.
+pub const GameplayResultV2 = extern struct {
+    abi_version: u32 = 2,
+    struct_size: u32 = @sizeOf(GameplayResultV2),
+    decision: DecisionV1 = .{},
+    objects_checked: u32 = 0,
+    matched_clicks: u32 = 0,
+    mean_abs_timing_error_milli: u32 = 0,
+    timing_stddev_milli: u32 = 0,
+    exact_timing_bps: u32 = 0,
+    center_hits_bps: u32 = 0,
+    mean_center_distance_milli: u32 = 0,
+    snap_events: u32 = 0,
+    key_press_count: u32 = 0,
+    key_hold_count: u32 = 0,
+    mean_hold_duration_milli: u32 = 0,
+    hold_duration_stddev_milli: u32 = 0,
+    alternation_bps: u32 = 0,
+    target_distance_stddev_milli: u32 = 0,
+    velocity_spike_count: u32 = 0,
+    movement_velocity_stddev_milli: u32 = 0,
+    reserved: [2]u64 = [_]u64{0} ** 2,
+    // 0 means unavailable; 1 is measured single-onset temporal head matching.
+    input_basis_version: u32 = 0,
+    timing_samples: u32 = 0,
+    ambiguous_matched_presses: u32 = 0,
+    simultaneous_press_frames: u32 = 0,
+    alternation_opportunities: u32 = 0,
+    reserved_v2: [2]u64 = [_]u64{0} ** 2,
+
+    pub fn legacy(self: GameplayResultV2) GameplayResultV1 {
+        var result: GameplayResultV1 = .{};
+        inline for (@typeInfo(GameplayResultV1).@"struct".fields) |field| {
+            if (comptime !std.mem.eql(u8, field.name, "abi_version") and !std.mem.eql(u8, field.name, "struct_size"))
+                @field(result, field.name) = @field(self, field.name);
+        }
+        return result;
+    }
+
+    pub fn inputBasis(self: GameplayResultV2) ?InputBasis {
+        if (self.input_basis_version != 1) return null;
+        return .{
+            .version = 1,
+            .timing_samples = self.timing_samples,
+            .ambiguous_matched_presses = self.ambiguous_matched_presses,
+            .simultaneous_press_frames = self.simultaneous_press_frames,
+            .alternation_opportunities = self.alternation_opportunities,
+        };
+    }
 };

@@ -660,7 +660,7 @@ test "failed stable plays cannot emit behavioral shadow evidence" {
 }
 
 test "raw unstacked cursor output cannot become review evidence" {
-    var result: anticheat_abi.GameplayResultV1 = .{
+    var result: anticheat_abi.GameplayResultV2 = .{
         .decision = .{ .action = anticheat_abi.Action.challenge, .reason = anticheat_abi.Reason.aim_center_lock, .risk_score = 900, .confidence_bps = 9900, .rule_revision = anticheat_abi.rule_revision },
         .matched_clicks = 80,
         .timing_stddev_milli = 2_000,

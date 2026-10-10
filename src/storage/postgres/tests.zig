@@ -2461,6 +2461,54 @@ test "postgres check exemptions and native lazer evidence remain separate" {
     try std.testing.expect(std.mem.indexOf(u8, audit, "mode=integrity") != null);
 }
 
+test "postgres timing basis round trips with nullable historical evidence" {
+    const raw_conninfo = std.c.getenv("ZIGCHO_TEST_POSTGRES_STORE_URL") orelse return error.SkipZigTest;
+    var store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));
+    defer store.close();
+    try store.migrate();
+    const player = try store.register("pg basis player", "pg-basis@example.test", "44444444444444444444444444444444");
+    try @import("../tests/input_basis.zig").verify(&store, player);
+    {
+        var lease = store.pool.acquire();
+        defer lease.release();
+        try std.testing.expectError(error.DatabaseQueryFailed, postgres.exec(lease.conn, "UPDATE zigcho.anticheat_observations SET timing_samples=99 WHERE module='input-basis-fixture' AND input_basis_version=1"));
+        try std.testing.expectError(error.DatabaseQueryFailed, postgres.exec(lease.conn, "UPDATE zigcho.anticheat_observations SET input_basis_version=1 WHERE module='input-basis-fixture' AND input_basis_version IS NULL"));
+    }
+    try store.migrate();
+    try @import("../tests/input_basis.zig").verify(&store, player);
+}
+
+test "postgres migration 51 retains old timing values without inventing sample counts" {
+    const raw_conninfo = std.c.getenv("ZIGCHO_TEST_POSTGRES_MIGRATE_URL") orelse return error.SkipZigTest;
+    {
+        var store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));
+        defer store.close();
+        try store.migrate();
+        const player = try store.register("pg old basis", "pg-old-basis@example.test", "55555555555555555555555555555555");
+        _ = try store.recordAnticheatObservation(player, .{ .source = .lazer_score, .module = "pg-old-basis-fixture", .rule_revision = 8, .action = 1, .reason = 4002, .risk_score = 1, .confidence_bps = 1, .objects_checked = 2, .matched_clicks = 2, .mean_abs_timing_error_milli = 25 });
+        {
+            var lease = store.pool.acquire();
+            defer lease.release();
+            // Isolated migration database only. Reproduce schema 50, then use the real migrator.
+            try postgres.exec(lease.conn, "ALTER TABLE zigcho.anticheat_observations DROP CONSTRAINT anticheat_input_basis,DROP COLUMN input_basis_version,DROP COLUMN timing_samples,DROP COLUMN ambiguous_matched_presses,DROP COLUMN simultaneous_press_frames,DROP COLUMN alternation_opportunities; DELETE FROM zigcho.schema_migrations WHERE version=51");
+        }
+        try store.migrate();
+    }
+    var reopened = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));
+    defer reopened.close();
+    try reopened.migrate();
+    var lease = reopened.pool.acquire();
+    defer lease.release();
+    var history = try postgres.query(lease.conn, "SELECT mean_abs_timing_error_milli,input_basis_version,timing_samples,ambiguous_matched_presses,simultaneous_press_frames,alternation_opportunities FROM zigcho.anticheat_observations WHERE module='pg-old-basis-fixture'");
+    defer history.deinit();
+    try std.testing.expectEqual(@as(usize, 1), history.rows());
+    try std.testing.expectEqual(@as(i32, 25), try history.int(i32, 0, 0));
+    for (1..6) |column| try std.testing.expect(history.isNull(0, column));
+    var version = try postgres.query(lease.conn, "SELECT max(version) FROM zigcho.schema_migrations");
+    defer version.deinit();
+    try std.testing.expectEqual(schema_version, try version.int(i32, 0, 0));
+}
+
 test "postgres anticheat hardware and flags stay review only" {
     const raw_conninfo = std.c.getenv("ZIGCHO_TEST_POSTGRES_STORE_URL") orelse return error.SkipZigTest;
     var store = try Store.open(std.testing.allocator, std.testing.io, std.mem.span(raw_conninfo));

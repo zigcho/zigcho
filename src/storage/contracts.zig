@@ -245,6 +245,7 @@ pub const AnticheatObservation = struct {
     target_distance_stddev_milli: u32 = 0,
     velocity_spike_count: u32 = 0,
     movement_velocity_stddev_milli: u32 = 0,
+    input_basis: ?@import("../anticheat_abi.zig").InputBasis = null,
 };
 
 pub fn validateAnticheatObservation(user_id: i32, observation: AnticheatObservation) !void {
@@ -255,6 +256,15 @@ pub fn validateAnticheatObservation(user_id: i32, observation: AnticheatObservat
     if (observation.action > 3 or observation.sample_weight == 0 or observation.sample_weight > 100_000 or observation.risk_score > 1000 or observation.confidence_bps > 10_000 or observation.replay_match_count > 100_000) return error.InvalidAnticheatObservation;
     if (observation.evidence > std.math.maxInt(i64) or observation.decision_flags > std.math.maxInt(i64)) return error.InvalidAnticheatObservation;
     if (observation.matched_clicks > observation.objects_checked or observation.snap_events > observation.objects_checked or observation.exact_timing_bps > 10_000 or observation.center_hits_bps > 10_000 or observation.key_hold_count > observation.key_press_count or observation.alternation_bps > 10_000) return error.InvalidAnticheatObservation;
+    if (observation.input_basis) |basis| {
+        if (basis.version != 1 or @as(u64, basis.timing_samples) + basis.ambiguous_matched_presses != observation.matched_clicks or
+            @as(u64, basis.simultaneous_press_frames) * 2 > observation.key_press_count or
+            basis.ambiguous_matched_presses > @as(u64, basis.simultaneous_press_frames) * 2 or
+            basis.alternation_opportunities > (observation.key_press_count -| 1)) return error.InvalidAnticheatObservation;
+        if (basis.timing_samples == 0 and (observation.mean_abs_timing_error_milli != 0 or observation.exact_timing_bps != 0)) return error.InvalidAnticheatObservation;
+        if (basis.timing_samples < 2 and observation.timing_stddev_milli != 0) return error.InvalidAnticheatObservation;
+        if (basis.alternation_opportunities == 0 and observation.alternation_bps != 0) return error.InvalidAnticheatObservation;
+    }
 }
 
 pub const CustomAvatar = struct {

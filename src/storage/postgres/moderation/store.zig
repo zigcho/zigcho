@@ -123,9 +123,9 @@ pub fn revokeAnticheatExclusion(self: anytype, actor_id: i32, exclusion_id: i64,
 
 pub fn recordAnticheatObservation(self: anytype, user_id: i32, observation: AnticheatObservation) !i64 {
     try storage_contracts.validateAnticheatObservation(user_id, observation);
-    var buffers: [33][64]u8 = undefined;
+    var buffers: [38][64]u8 = undefined;
     var cursor: usize = 0;
-    var params: [32]?[]const u8 = undefined;
+    var params: [37]?[]const u8 = undefined;
     params[0] = try common.param(&buffers, &cursor, user_id);
     params[1] = if (observation.score_id) |score_id| try common.param(&buffers, &cursor, score_id) else null;
     params[2] = observation.source.text();
@@ -155,6 +155,15 @@ pub fn recordAnticheatObservation(self: anytype, user_id: i32, observation: Anti
     params[26] = try common.param(&buffers, &cursor, observation.target_distance_stddev_milli);
     params[27] = try common.param(&buffers, &cursor, observation.velocity_spike_count);
     params[28] = try common.param(&buffers, &cursor, observation.movement_velocity_stddev_milli);
+    if (observation.input_basis) |basis| {
+        params[32] = try common.param(&buffers, &cursor, basis.version);
+        params[33] = try common.param(&buffers, &cursor, basis.timing_samples);
+        params[34] = try common.param(&buffers, &cursor, basis.ambiguous_matched_presses);
+        params[35] = try common.param(&buffers, &cursor, basis.simultaneous_press_frames);
+        params[36] = try common.param(&buffers, &cursor, basis.alternation_opportunities);
+    } else {
+        for (32..37) |index| params[index] = null;
+    }
     var lease = self.pool.acquire();
     defer lease.release();
     try postgres.exec(lease.conn, "BEGIN");
@@ -167,8 +176,8 @@ pub fn recordAnticheatObservation(self: anytype, user_id: i32, observation: Anti
     defer active_exclusion.deinit();
     params[29] = if (active_exclusion.rows() == 0) null else try common.param(&buffers, &cursor, try active_exclusion.int(i64, 0, 0));
     if (observation.score_id == null and observation.lazer_score_id == null) {
-        const coalesce_params = [_]?[]const u8{ params[0], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9], params[10], params[11], params[12], params[13], params[14], params[15], params[16], params[17], params[18], params[19], params[20], params[21], params[22], params[23], params[24], params[25], params[26], params[27], params[28], params[29], if (observation.enforced) "true" else "false" };
-        var existing = try postgres.queryParams(self.allocator, lease.conn, "SELECT id FROM zigcho.anticheat_observations WHERE user_id=$1 AND score_id IS NULL AND lazer_score_id IS NULL AND review_label='pending' AND source=$2 AND module=$3 AND action=$4 AND sample_weight=$5 AND reason=$6 AND risk_score=$7 AND confidence_bps=$8 AND evidence=$9 AND decision_flags=$10 AND rule_revision=$11 AND objects_checked=$12 AND matched_clicks=$13 AND mean_abs_timing_error_milli=$14 AND timing_stddev_milli=$15 AND exact_timing_bps=$16 AND center_hits_bps=$17 AND mean_center_distance_milli=$18 AND snap_events=$19 AND replay_match_count=$20 AND key_press_count=$21 AND key_hold_count=$22 AND mean_hold_duration_milli=$23 AND hold_duration_stddev_milli=$24 AND alternation_bps=$25 AND target_distance_stddev_milli=$26 AND velocity_spike_count=$27 AND movement_velocity_stddev_milli=$28 AND coalesce(review_exclusion_id,0)=coalesce($29::bigint,0) AND enforced=$30::boolean AND created_at>=extract(epoch FROM clock_timestamp())::bigint-86400 ORDER BY id DESC LIMIT 1", &coalesce_params);
+        const coalesce_params = [_]?[]const u8{ params[0], params[2], params[3], params[4], params[5], params[6], params[7], params[8], params[9], params[10], params[11], params[12], params[13], params[14], params[15], params[16], params[17], params[18], params[19], params[20], params[21], params[22], params[23], params[24], params[25], params[26], params[27], params[28], params[29], if (observation.enforced) "true" else "false", params[32], params[33], params[34], params[35], params[36] };
+        var existing = try postgres.queryParams(self.allocator, lease.conn, "SELECT id FROM zigcho.anticheat_observations WHERE user_id=$1 AND score_id IS NULL AND lazer_score_id IS NULL AND review_label='pending' AND source=$2 AND module=$3 AND action=$4 AND sample_weight=$5 AND reason=$6 AND risk_score=$7 AND confidence_bps=$8 AND evidence=$9 AND decision_flags=$10 AND rule_revision=$11 AND objects_checked=$12 AND matched_clicks=$13 AND mean_abs_timing_error_milli=$14 AND timing_stddev_milli=$15 AND exact_timing_bps=$16 AND center_hits_bps=$17 AND mean_center_distance_milli=$18 AND snap_events=$19 AND replay_match_count=$20 AND key_press_count=$21 AND key_hold_count=$22 AND mean_hold_duration_milli=$23 AND hold_duration_stddev_milli=$24 AND alternation_bps=$25 AND target_distance_stddev_milli=$26 AND velocity_spike_count=$27 AND movement_velocity_stddev_milli=$28 AND coalesce(review_exclusion_id,0)=coalesce($29::bigint,0) AND enforced=$30::boolean AND input_basis_version IS NOT DISTINCT FROM $31::integer AND timing_samples IS NOT DISTINCT FROM $32::integer AND ambiguous_matched_presses IS NOT DISTINCT FROM $33::integer AND simultaneous_press_frames IS NOT DISTINCT FROM $34::integer AND alternation_opportunities IS NOT DISTINCT FROM $35::integer AND created_at>=extract(epoch FROM clock_timestamp())::bigint-86400 ORDER BY id DESC LIMIT 1", &coalesce_params);
         defer existing.deinit();
         if (existing.rows() != 0) {
             const observation_id = try existing.int(i64, 0, 0);
@@ -178,7 +187,7 @@ pub fn recordAnticheatObservation(self: anytype, user_id: i32, observation: Anti
     }
     params[31] = if (observation.enforced) "true" else "false";
     params[30] = if (observation.lazer_score_id) |id| try common.param(&buffers, &cursor, id) else null;
-    var result = try postgres.queryParams(self.allocator, lease.conn, "INSERT INTO zigcho.anticheat_observations(user_id,score_id,source,module,action,sample_weight,reason,risk_score,confidence_bps,evidence,decision_flags,rule_revision,objects_checked,matched_clicks,mean_abs_timing_error_milli,timing_stddev_milli,exact_timing_bps,center_hits_bps,mean_center_distance_milli,snap_events,replay_match_count,key_press_count,key_hold_count,mean_hold_duration_milli,hold_duration_stddev_milli,alternation_bps,target_distance_stddev_milli,velocity_spike_count,movement_velocity_stddev_milli,review_exclusion_id,lazer_score_id,enforced) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32::boolean) RETURNING id", &params);
+    var result = try postgres.queryParams(self.allocator, lease.conn, "INSERT INTO zigcho.anticheat_observations(user_id,score_id,source,module,action,sample_weight,reason,risk_score,confidence_bps,evidence,decision_flags,rule_revision,objects_checked,matched_clicks,mean_abs_timing_error_milli,timing_stddev_milli,exact_timing_bps,center_hits_bps,mean_center_distance_milli,snap_events,replay_match_count,key_press_count,key_hold_count,mean_hold_duration_milli,hold_duration_stddev_milli,alternation_bps,target_distance_stddev_milli,velocity_spike_count,movement_velocity_stddev_milli,review_exclusion_id,lazer_score_id,enforced,input_basis_version,timing_samples,ambiguous_matched_presses,simultaneous_press_frames,alternation_opportunities) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32::boolean,$33,$34,$35,$36,$37) RETURNING id", &params);
     defer result.deinit();
     const observation_id = try result.int(i64, 0, 0);
     var detail_buf: [560]u8 = undefined;
@@ -681,7 +690,7 @@ pub fn staffAnticheatJson(self: anytype, allocator: std.mem.Allocator) ![]u8 {
     defer lease.release();
     try postgres.exec(lease.conn, "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
     errdefer postgres.exec(lease.conn, "ROLLBACK") catch {};
-    var result = try postgres.query(lease.conn, "SELECT o.id,o.user_id,u.name,coalesce(o.score_id,o.lazer_score_id,0),o.source,o.module,o.action,o.sample_weight,o.reason,o.risk_score,o.confidence_bps,o.evidence,o.decision_flags,o.rule_revision,o.objects_checked,o.matched_clicks,o.mean_abs_timing_error_milli,o.timing_stddev_milli,o.exact_timing_bps,o.center_hits_bps,o.mean_center_distance_milli,o.snap_events,o.replay_match_count,o.key_press_count,o.key_hold_count,o.mean_hold_duration_milli,o.hold_duration_stddev_milli,o.alternation_bps,o.target_distance_stddev_milli,o.velocity_spike_count,o.movement_velocity_stddev_milli,o.review_label,coalesce(reviewer.name,''),o.review_note,coalesce(o.reviewed_at,0),o.created_at,coalesce(x.id,0),coalesce(x.scope,''),coalesce(x.reason,''),coalesce(creator.name,''),coalesce(x.created_at,0),coalesce(x.expires_at,0),coalesce(revoker.name,''),coalesce(x.revoked_at,0),coalesce(x.revoke_reason,''),o.enforced FROM zigcho.anticheat_observations o JOIN zigcho.users u ON u.id=o.user_id LEFT JOIN zigcho.users reviewer ON reviewer.id=o.reviewer_id LEFT JOIN zigcho.anticheat_review_exclusions x ON x.id=o.review_exclusion_id LEFT JOIN zigcho.users creator ON creator.id=x.created_by LEFT JOIN zigcho.users revoker ON revoker.id=x.revoked_by WHERE o.id IN(SELECT id FROM zigcho.anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM zigcho.anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM zigcho.anticheat_observations WHERE review_label!='pending' ORDER BY created_at DESC,id DESC LIMIT 250) ORDER BY (o.review_label='pending' AND o.review_exclusion_id IS NULL) DESC,(o.review_label='pending' AND o.review_exclusion_id IS NOT NULL) DESC,o.created_at DESC,o.id DESC");
+    var result = try postgres.query(lease.conn, "SELECT o.id,o.user_id,u.name,coalesce(o.score_id,o.lazer_score_id,0),o.source,o.module,o.action,o.sample_weight,o.reason,o.risk_score,o.confidence_bps,o.evidence,o.decision_flags,o.rule_revision,o.objects_checked,o.matched_clicks,o.mean_abs_timing_error_milli,o.timing_stddev_milli,o.exact_timing_bps,o.center_hits_bps,o.mean_center_distance_milli,o.snap_events,o.replay_match_count,o.key_press_count,o.key_hold_count,o.mean_hold_duration_milli,o.hold_duration_stddev_milli,o.alternation_bps,o.target_distance_stddev_milli,o.velocity_spike_count,o.movement_velocity_stddev_milli,o.review_label,coalesce(reviewer.name,''),o.review_note,coalesce(o.reviewed_at,0),o.created_at,coalesce(x.id,0),coalesce(x.scope,''),coalesce(x.reason,''),coalesce(creator.name,''),coalesce(x.created_at,0),coalesce(x.expires_at,0),coalesce(revoker.name,''),coalesce(x.revoked_at,0),coalesce(x.revoke_reason,''),o.enforced,o.input_basis_version,o.timing_samples,o.ambiguous_matched_presses,o.simultaneous_press_frames,o.alternation_opportunities FROM zigcho.anticheat_observations o JOIN zigcho.users u ON u.id=o.user_id LEFT JOIN zigcho.users reviewer ON reviewer.id=o.reviewer_id LEFT JOIN zigcho.anticheat_review_exclusions x ON x.id=o.review_exclusion_id LEFT JOIN zigcho.users creator ON creator.id=x.created_by LEFT JOIN zigcho.users revoker ON revoker.id=x.revoked_by WHERE o.id IN(SELECT id FROM zigcho.anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM zigcho.anticheat_observations WHERE review_label='pending' AND review_exclusion_id IS NOT NULL ORDER BY created_at DESC,id DESC LIMIT 250) OR o.id IN(SELECT id FROM zigcho.anticheat_observations WHERE review_label!='pending' ORDER BY created_at DESC,id DESC LIMIT 250) ORDER BY (o.review_label='pending' AND o.review_exclusion_id IS NULL) DESC,(o.review_label='pending' AND o.review_exclusion_id IS NOT NULL) DESC,o.created_at DESC,o.id DESC");
     defer result.deinit();
     var pending_result = try postgres.query(lease.conn, "SELECT count(*) FILTER(WHERE review_label='pending' AND review_exclusion_id IS NULL),count(*) FILTER(WHERE review_label='pending' AND review_exclusion_id IS NOT NULL) FROM zigcho.anticheat_observations");
     defer pending_result.deinit();
@@ -729,6 +738,7 @@ pub fn staffAnticheatJson(self: anytype, allocator: std.mem.Allocator) ![]u8 {
         try common.jsonString(&output.writer, result.value(row, 31));
         try output.writer.writeAll(",\"meaning\":");
         try anticheat_review.writeObservationJson(&output.writer, .{
+            .module = result.value(row, 5),
             .action = try result.int(u32, row, 6),
             .enforced = try result.boolean(row, 45),
             .reason = try result.int(u32, row, 8),
@@ -755,6 +765,13 @@ pub fn staffAnticheatJson(self: anytype, allocator: std.mem.Allocator) ![]u8 {
                 .target_distance_stddev_milli = try result.int(u32, row, 28),
                 .velocity_spike_count = try result.int(u32, row, 29),
                 .movement_velocity_stddev_milli = try result.int(u32, row, 30),
+                .input_basis = if (result.value(row, 46).len == 0) null else .{
+                    .version = try result.int(u32, row, 46),
+                    .timing_samples = try result.int(u32, row, 47),
+                    .ambiguous_matched_presses = try result.int(u32, row, 48),
+                    .simultaneous_press_frames = try result.int(u32, row, 49),
+                    .alternation_opportunities = try result.int(u32, row, 50),
+                },
             },
         });
         try output.writer.writeAll(",\"reviewer\":");

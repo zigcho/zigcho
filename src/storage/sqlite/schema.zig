@@ -162,6 +162,17 @@ pub fn migrate(self: *Store) !void {
         _ = c.sqlite3_finalize(shape);
         if (present) try self.exec("PRAGMA user_version=48") else try self.exec(database_sql.sqliteMigration(48));
     }
+    if (version < 49) {
+        var basis_shape: ?*c.sqlite3_stmt = null;
+        if (c.sqlite3_prepare_v2(self.db, "SELECT count(*) FROM pragma_table_info('anticheat_observations') WHERE name IN('input_basis_version','timing_samples','ambiguous_matched_presses','simultaneous_press_frames','alternation_opportunities')", -1, &basis_shape, null) != c.SQLITE_OK) return error.DatabaseQueryFailed;
+        if (c.sqlite3_step(basis_shape) != c.SQLITE_ROW) {
+            _ = c.sqlite3_finalize(basis_shape);
+            return error.DatabaseQueryFailed;
+        }
+        const columns = c.sqlite3_column_int(basis_shape, 0);
+        _ = c.sqlite3_finalize(basis_shape);
+        if (columns == 5) try self.exec("PRAGMA user_version=49") else if (columns == 0) try self.exec(database_sql.sqliteMigration(49)) else return error.DatabaseSchemaMismatch;
+    }
     try self.backfillLazerClassicScores();
     try self.exec("DELETE FROM user_stats_history WHERE day<((unixepoch()/86400)-89)*86400");
     try self.exec(

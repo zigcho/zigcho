@@ -417,6 +417,12 @@ CREATE TABLE anticheat_observations (
     velocity_spike_count integer NOT NULL DEFAULT 0 CHECK(velocity_spike_count >= 0),
     movement_velocity_stddev_milli integer NOT NULL DEFAULT 0 CHECK(movement_velocity_stddev_milli >= 0),
     review_label text NOT NULL DEFAULT 'pending' CHECK(review_label IN ('pending','clean','uncertain','cheat','dismissed')),
+    input_basis_version integer,
+    timing_samples integer,
+    ambiguous_matched_presses integer,
+    simultaneous_press_frames integer,
+    alternation_opportunities integer,
+    CONSTRAINT anticheat_input_basis CHECK ((input_basis_version IS NULL AND timing_samples IS NULL AND ambiguous_matched_presses IS NULL AND simultaneous_press_frames IS NULL AND alternation_opportunities IS NULL) OR (input_basis_version IS NOT NULL AND timing_samples IS NOT NULL AND ambiguous_matched_presses IS NOT NULL AND simultaneous_press_frames IS NOT NULL AND alternation_opportunities IS NOT NULL AND input_basis_version=1 AND timing_samples>=0 AND ambiguous_matched_presses>=0 AND simultaneous_press_frames>=0 AND alternation_opportunities>=0 AND timing_samples::bigint+ambiguous_matched_presses=matched_clicks AND simultaneous_press_frames::bigint*2<=key_press_count AND ambiguous_matched_presses<=simultaneous_press_frames::bigint*2 AND alternation_opportunities<=greatest(key_press_count-1,0) AND (timing_samples>0 OR (mean_abs_timing_error_milli=0 AND exact_timing_bps=0)) AND (timing_samples>=2 OR timing_stddev_milli=0) AND (alternation_opportunities>0 OR alternation_bps=0))),
     reviewer_id integer REFERENCES users(id) ON DELETE SET NULL,
     review_note text NOT NULL DEFAULT '' CHECK(length(review_note) <= 1000),
     reviewed_at bigint,
@@ -816,4 +822,4 @@ VALUES('#osu','general chat',1),('#announce','updates',8192),('#lobby','multipla
 INSERT INTO server_controls(key)
 VALUES('registrations'),('stable_login'),('lazer_login'),('stable_scores'),('lazer_scores'),('lazer_multiplayer'),('spectator'),('bss'),('beatmap_downloads'),('website_writes');
 
-INSERT INTO schema_migrations(version) VALUES (50);
+INSERT INTO schema_migrations(version) VALUES (51);

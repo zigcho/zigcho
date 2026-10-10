@@ -3,7 +3,7 @@ const abi = @import("anticheat_abi.zig");
 const anticheat = @import("anticheat_plugin.zig");
 
 fn checkGameplayRevision(host: *anticheat.Host) !void {
-    // Exercise rule 8 through the real loader, not just the module's own ABI.
+    // Exercise rule 9 and result v2 through the real loader.
     // A same-frame pair is two presses for coverage, but its action order is
     // unknown and must not turn into exact-timing or alternation support.
     var paired_objects: [160]abi.HitObjectV1 = undefined;
@@ -27,6 +27,8 @@ fn checkGameplayRevision(host: *anticheat.Host) !void {
     });
     if (paired.matched_clicks != 160 or paired.key_press_count != 160 or paired.exact_timing_bps != 0 or paired.alternation_bps != 0 or paired.decision.action != abi.Action.allow)
         return error.UnexpectedSimultaneousPressDecision;
+    if (paired.input_basis_version != 1 or paired.timing_samples != 0 or paired.ambiguous_matched_presses != 160 or
+        paired.simultaneous_press_frames != 80 or paired.alternation_opportunities != 0) return error.UnexpectedInputBasis;
 
     // Long complete map-bound trace: sustained ten-ms samples, varied manual
     // timing/holds. This is a review fixture, never a labelled cheater sample.
@@ -49,6 +51,8 @@ fn checkGameplayRevision(host: *anticheat.Host) !void {
         .object_count = objects.len,
     };
     const cadence = try host.evaluateGameplay(event);
+    if (cadence.input_basis_version != 1 or cadence.timing_samples != 80 or cadence.ambiguous_matched_presses != 0 or
+        cadence.simultaneous_press_frames != 0 or cadence.alternation_opportunities != 79) return error.UnexpectedInputBasis;
     if (cadence.decision.reason != abi.Reason.suspicious_frame_cadence or cadence.decision.action != abi.Action.audit or
         cadence.decision.flags != abi.DecisionFlag.write_audit | abi.DecisionFlag.require_staff_review) return error.UnexpectedGameplayCadenceDecision;
     for ([_]u64{ 1 << 2, 1 << 7, 1 << 10, 1 << 13, 1 << 60, (1 << 6) | (1 << 8) }) |mods| {

@@ -6,7 +6,7 @@ const RuleRevisionFn = *const fn () callconv(.c) u32;
 const SizeFn = *const fn () callconv(.c) u32;
 const NameFn = *const fn () callconv(.c) ?[*:0]const u8;
 const EvaluateFn = *const fn (?*const abi.EventV1, ?*abi.DecisionV1) callconv(.c) u32;
-const EvaluateGameplayFn = *const fn (?*const abi.GameplayEventV1, ?*abi.GameplayResultV1) callconv(.c) u32;
+const EvaluateGameplayFn = *const fn (?*const abi.GameplayEventV1, ?*abi.GameplayResultV2) callconv(.c) u32;
 
 const max_match_count: u32 = 100_000;
 const max_frames: u32 = 2_000_000;
@@ -105,6 +105,20 @@ fn validateGameplayResult(event: abi.GameplayEventV1, result: abi.GameplayResult
     if (result.key_press_count == 0 and (result.key_hold_count != 0 or result.mean_hold_duration_milli != 0 or result.hold_duration_stddev_milli != 0 or result.alternation_bps != 0)) return error.InvalidDecision;
 }
 
+fn validateGameplayResultV2(event: abi.GameplayEventV1, result: abi.GameplayResultV2) !void {
+    if (result.abi_version != 2 or result.struct_size != @sizeOf(abi.GameplayResultV2) or
+        !allZero(result.reserved_v2) or result.input_basis_version != 1) return error.InvalidDecision;
+    try validateGameplayResult(event, result.legacy());
+    if (@as(u64, result.timing_samples) + result.ambiguous_matched_presses != result.matched_clicks or
+        @as(u64, result.simultaneous_press_frames) * 2 > result.key_press_count or
+        result.simultaneous_press_frames > (event.frame_count -| 1) or
+        result.ambiguous_matched_presses > @as(u64, result.simultaneous_press_frames) * 2 or
+        result.alternation_opportunities > (result.key_press_count -| 1)) return error.InvalidDecision;
+    if (result.timing_samples == 0 and (result.mean_abs_timing_error_milli != 0 or result.exact_timing_bps != 0)) return error.InvalidDecision;
+    if (result.timing_samples < 2 and result.timing_stddev_milli != 0) return error.InvalidDecision;
+    if (result.alternation_opportunities == 0 and result.alternation_bps != 0) return error.InvalidDecision;
+}
+
 pub const Host = struct {
     library: std.DynLib,
     module_name: []const u8,
@@ -122,15 +136,17 @@ pub const Host = struct {
         const decision_size = library.lookup(SizeFn, "zigcho_anticheat_decision_size_v1") orelse return error.MissingDecisionSize;
         const gameplay_event_size = library.lookup(SizeFn, "zigcho_anticheat_gameplay_event_size_v1") orelse return error.MissingGameplayEventSize;
         const gameplay_result_size = library.lookup(SizeFn, "zigcho_anticheat_gameplay_result_size_v1") orelse return error.MissingGameplayResultSize;
+        const gameplay_result_v2_size = library.lookup(SizeFn, "zigcho_anticheat_gameplay_result_size_v2") orelse return error.MissingGameplayResultSize;
         const name_fn = library.lookup(NameFn, "zigcho_anticheat_name") orelse return error.MissingName;
         const evaluate_fn = library.lookup(EvaluateFn, "zigcho_anticheat_evaluate_v1") orelse return error.MissingEvaluator;
-        const evaluate_gameplay_fn = library.lookup(EvaluateGameplayFn, "zigcho_anticheat_evaluate_gameplay_v1") orelse return error.MissingGameplayEvaluator;
+        const evaluate_gameplay_fn = library.lookup(EvaluateGameplayFn, "zigcho_anticheat_evaluate_gameplay_v2") orelse return error.MissingGameplayEvaluator;
 
         if (abi_version() != abi.version) return error.UnsupportedAbi;
         const rule_revision = rule_revision_fn();
         if (rule_revision != abi.rule_revision) return error.UnsupportedRuleRevision;
         if (event_size() != @sizeOf(abi.EventV1) or decision_size() != @sizeOf(abi.DecisionV1) or
-            gameplay_event_size() != @sizeOf(abi.GameplayEventV1) or gameplay_result_size() != @sizeOf(abi.GameplayResultV1)) return error.LayoutMismatch;
+            gameplay_event_size() != @sizeOf(abi.GameplayEventV1) or gameplay_result_size() != @sizeOf(abi.GameplayResultV1) or
+            gameplay_result_v2_size() != @sizeOf(abi.GameplayResultV2)) return error.LayoutMismatch;
         const module_name_pointer = name_fn() orelse return error.InvalidModuleName;
         const bounded_name = module_name_pointer[0..65];
         const module_name_end = std.mem.indexOfScalar(u8, bounded_name, 0) orelse return error.InvalidModuleName;
@@ -167,11 +183,11 @@ pub const Host = struct {
         return decision;
     }
 
-    pub fn evaluateGameplay(self: Host, event: abi.GameplayEventV1) !abi.GameplayResultV1 {
+    pub fn evaluateGameplay(self: Host, event: abi.GameplayEventV1) !abi.GameplayResultV2 {
         try validateGameplayEvent(event);
-        var result: abi.GameplayResultV1 = .{};
+        var result: abi.GameplayResultV2 = .{};
         if (self.evaluate_gameplay_fn(&event, &result) != abi.Status.ok) return error.ModuleRejectedEvent;
-        try validateGameplayResult(event, result);
+        try validateGameplayResultV2(event, result);
         if (result.decision.rule_revision != self.rule_revision) return error.RuleRevisionMismatch;
         return result;
     }
@@ -219,6 +235,22 @@ test "anticheat host verifies replay input and module metric consistency" {
     };
     try validateGameplayEvent(event);
     try validateGameplayResult(event, .{ .objects_checked = 1, .matched_clicks = 1, .key_press_count = 1 });
+    const measured: abi.GameplayResultV2 = .{ .objects_checked = 1, .matched_clicks = 1, .key_press_count = 1, .input_basis_version = 1, .timing_samples = 1 };
+    try validateGameplayResultV2(event, measured);
+    inline for (.{ "abi_version", "struct_size", "input_basis_version", "timing_samples", "ambiguous_matched_presses", "simultaneous_press_frames", "alternation_opportunities", "timing_stddev_milli" }) |field| {
+        var broken = measured;
+        @field(broken, field) += 1;
+        try std.testing.expectError(error.InvalidDecision, validateGameplayResultV2(event, broken));
+    }
+    var reserved = measured;
+    reserved.reserved_v2[0] = 1;
+    try std.testing.expectError(error.InvalidDecision, validateGameplayResultV2(event, reserved));
+    reserved = measured;
+    reserved.reserved[0] = 1;
+    try std.testing.expectError(error.InvalidDecision, validateGameplayResultV2(event, reserved));
+    var no_basis = measured;
+    no_basis.input_basis_version = 0;
+    try std.testing.expectError(error.InvalidDecision, validateGameplayResultV2(event, no_basis));
     try std.testing.expectError(error.InvalidDecision, validateGameplayResult(event, .{ .objects_checked = 2 }));
     var corrupt = event;
     var bad_frames = frames;

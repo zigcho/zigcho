@@ -84,3 +84,43 @@ test "score-less lazer findings never coalesce into persisted score evidence" {
     try std.testing.expect(attached != unattached);
     try std.testing.expectEqual(unattached, try store.recordAnticheatObservation(player, observation));
 }
+
+test "sqlite timing basis round trips without coalescing unknown history" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&buf, ".zig-cache/tmp/{s}/input-basis.db", .{tmp.sub_path});
+    var store = try storage.Store.open(std.testing.allocator, std.testing.io, path);
+    defer store.close();
+    try store.migrate();
+    const player = try store.register("basis player", "basis@example.invalid", "00000000000000000000000000000000");
+    try @import("input_basis.zig").verify(&store, player);
+    try std.testing.expectError(error.DatabaseQueryFailed, store.exec("UPDATE anticheat_observations SET timing_samples=99 WHERE input_basis_version=1"));
+    try std.testing.expectError(error.DatabaseQueryFailed, store.exec("UPDATE anticheat_observations SET input_basis_version=1 WHERE input_basis_version IS NULL"));
+    try store.migrate();
+    try @import("input_basis.zig").verify(&store, player);
+}
+
+test "sqlite migration 49 retains raw history and survives restart" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var buf: [256]u8 = undefined;
+    const path = try std.fmt.bufPrintZ(&buf, ".zig-cache/tmp/{s}/basis-migration.db", .{tmp.sub_path});
+    {
+        var store = try storage.Store.open(std.testing.allocator, std.testing.io, path);
+        defer store.close();
+        try store.migrate();
+        const player = try store.register("old basis", "old-basis@example.invalid", "00000000000000000000000000000000");
+        _ = try store.recordAnticheatObservation(player, .{ .source = .lazer_score, .module = "old-basis-fixture", .rule_revision = 8, .action = 1, .reason = 4002, .risk_score = 1, .confidence_bps = 1, .objects_checked = 2, .matched_clicks = 2, .mean_abs_timing_error_milli = 25 });
+        // Isolated fixture: restore the old table shape, not a production downgrade.
+        try store.exec("ALTER TABLE anticheat_observations DROP COLUMN alternation_opportunities; ALTER TABLE anticheat_observations DROP COLUMN simultaneous_press_frames; ALTER TABLE anticheat_observations DROP COLUMN ambiguous_matched_presses; ALTER TABLE anticheat_observations DROP COLUMN timing_samples; ALTER TABLE anticheat_observations DROP COLUMN input_basis_version; PRAGMA user_version=48");
+        try store.migrate();
+    }
+    var reopened = try storage.Store.open(std.testing.allocator, std.testing.io, path);
+    defer reopened.close();
+    try reopened.migrate();
+    const json = try reopened.staffAnticheatJson(std.testing.allocator);
+    defer std.testing.allocator.free(json);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"mean_timing_milli\":25") != null);
+    try std.testing.expect(std.mem.indexOf(u8, json, "\"raw\":null,\"available\":false") != null);
+}
