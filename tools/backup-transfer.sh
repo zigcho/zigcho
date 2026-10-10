@@ -127,9 +127,9 @@ while [ "$index" -lt "$parts" ]; do
   printf 'range = "%s-%s"\nmax-filesize = %s\noutput = "%s"\nwrite-out = "%%{http_code}\\n"\n' "$start" "$end" "$((end - start + 1))" "$(curl_escape "$temporary_dir/part-$index")"
   index=$((index + 1))
 done >"$requests"
-# Small requests bound slow tails. One curl process, at most 64 active
+# Small requests bound slow tails. One curl process, at most 16 active
 # requests, and a 330-second overall cap; no unbounded process fan-out.
-if timeout --kill-after=10s 330s curl --config "$requests" --parallel --parallel-immediate --parallel-max 64 --fail-early >"$temporary_dir/statuses" 2>/dev/null; then
+if timeout --kill-after=10s 330s curl --config "$requests" --parallel --parallel-immediate --parallel-max 16 --fail-early >"$temporary_dir/statuses" 2>/dev/null; then
   :
 else
   status=$?
