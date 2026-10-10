@@ -2471,8 +2471,22 @@ test "postgres timing basis round trips with nullable historical evidence" {
     {
         var lease = store.pool.acquire();
         defer lease.release();
-        try std.testing.expectError(error.DatabaseQueryFailed, postgres.exec(lease.conn, "UPDATE zigcho.anticheat_observations SET timing_samples=99 WHERE module='input-basis-fixture' AND input_basis_version=1"));
-        try std.testing.expectError(error.DatabaseQueryFailed, postgres.exec(lease.conn, "UPDATE zigcho.anticheat_observations SET input_basis_version=1 WHERE module='input-basis-fixture' AND input_basis_version IS NULL"));
+        // Assert the expected SQLSTATE without logging intentional failures as
+        // production errors. Syntax, connection or other constraints don't pass.
+        for ([_][:0]const u8{
+            "UPDATE zigcho.anticheat_observations SET timing_samples=99 WHERE module='input-basis-fixture' AND input_basis_version=1",
+            "UPDATE zigcho.anticheat_observations SET input_basis_version=1 WHERE module='input-basis-fixture' AND input_basis_version IS NULL",
+        }) |sql| {
+            const result = postgres.c.PQexec(lease.conn, sql.ptr) orelse return error.DatabaseQueryFailed;
+            defer postgres.c.PQclear(result);
+            try std.testing.expectEqual(postgres.c.PGRES_FATAL_ERROR, postgres.c.PQresultStatus(result));
+            const state = postgres.c.PQresultErrorField(result, postgres.c.PG_DIAG_SQLSTATE);
+            try std.testing.expect(state != null);
+            try std.testing.expectEqualStrings("23514", std.mem.span(state));
+            const constraint = postgres.c.PQresultErrorField(result, postgres.c.PG_DIAG_CONSTRAINT_NAME);
+            try std.testing.expect(constraint != null);
+            try std.testing.expectEqualStrings("anticheat_input_basis", std.mem.span(constraint));
+        }
     }
     try store.migrate();
     try @import("../tests/input_basis.zig").verify(&store, player);

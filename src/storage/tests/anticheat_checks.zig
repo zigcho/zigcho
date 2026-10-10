@@ -95,8 +95,10 @@ test "sqlite timing basis round trips without coalescing unknown history" {
     try store.migrate();
     const player = try store.register("basis player", "basis@example.invalid", "00000000000000000000000000000000");
     try @import("input_basis.zig").verify(&store, player);
-    try std.testing.expectError(error.DatabaseQueryFailed, store.exec("UPDATE anticheat_observations SET timing_samples=99 WHERE input_basis_version=1"));
-    try std.testing.expectError(error.DatabaseQueryFailed, store.exec("UPDATE anticheat_observations SET input_basis_version=1 WHERE input_basis_version IS NULL"));
+    // Expected constraint rejection is not a production error log. Assert the
+    // database result directly; unrelated errors must still fail this fixture.
+    try std.testing.expectEqual(storage.c.SQLITE_CONSTRAINT, storage.c.sqlite3_exec(store.db, "UPDATE anticheat_observations SET timing_samples=99 WHERE input_basis_version=1", null, null, null));
+    try std.testing.expectEqual(storage.c.SQLITE_CONSTRAINT, storage.c.sqlite3_exec(store.db, "UPDATE anticheat_observations SET input_basis_version=1 WHERE input_basis_version IS NULL", null, null, null));
     try store.migrate();
     try @import("input_basis.zig").verify(&store, player);
 }
