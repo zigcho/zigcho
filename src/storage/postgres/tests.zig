@@ -2479,7 +2479,7 @@ test "postgres timing basis round trips with nullable historical evidence" {
         }) |sql| {
             const result = postgres.c.PQexec(lease.conn, sql.ptr) orelse return error.DatabaseQueryFailed;
             defer postgres.c.PQclear(result);
-            try std.testing.expectEqual(postgres.c.PGRES_FATAL_ERROR, postgres.c.PQresultStatus(result));
+            try std.testing.expectEqual(@as(c_uint, @intCast(postgres.c.PGRES_FATAL_ERROR)), postgres.c.PQresultStatus(result));
             const state = postgres.c.PQresultErrorField(result, postgres.c.PG_DIAG_SQLSTATE);
             try std.testing.expect(state != null);
             try std.testing.expectEqualStrings("23514", std.mem.span(state));
