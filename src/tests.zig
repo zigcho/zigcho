@@ -651,11 +651,12 @@ test "stable score client flags keep bancho compatible space encoding" {
 }
 
 test "failed stable plays cannot emit behavioral shadow evidence" {
-    try std.testing.expectEqual(@as(u64, 0), server_anticheat.stableReplayShadowEvidence(false, true, 3));
+    try std.testing.expectEqual(@as(u64, 0), server_anticheat.stableReplayShadowEvidence(false, 3));
     try std.testing.expectEqual(
-        anticheat_abi.Evidence.suspicious_frame_cadence | anticheat_abi.Evidence.replay_content_reused,
-        server_anticheat.stableReplayShadowEvidence(true, true, 3),
+        anticheat_abi.Evidence.replay_content_reused,
+        server_anticheat.stableReplayShadowEvidence(true, 3),
     );
+    try std.testing.expectEqual(@as(u64, 0), server_anticheat.stableReplayShadowEvidence(true, 0));
 }
 
 test "raw unstacked cursor output cannot become review evidence" {

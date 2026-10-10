@@ -168,8 +168,10 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
     // Never let a replay header claim RX/AP while the authenticated submission
     // says otherwise, or select different difficulty transforms for analysis.
     if (supported and (info.mods & ((1 << 1) | (1 << 4) | (1 << 7) | (1 << 13))) != (authoritative_mods & ((1 << 1) | (1 << 4) | (1 << 7) | (1 << 13)))) return .invalid_replay;
-    const cadence = anticheat_replay.frameCadence(prepared.frames);
-    const evidence = stableReplayShadowEvidence(score.passed, cadence.suspicious, 0);
+    // Native replay cadence is not a wall-clock speed measurement. The private
+    // gameplay module owns cadence eligibility and sampling; don't inject the
+    // retired host histogram into its decision.
+    const evidence: u64 = 0;
     const base: anticheat_abi.EventV1 = .{
         .event_kind = anticheat_abi.EventKind.score,
         .client_family = anticheat_abi.ClientFamily.lazer,
@@ -263,10 +265,9 @@ pub fn stableGameplayEvidence(score: stable_score.Submission, replay_match_count
     return stableScoreEvidence(score) | (if (replay_match_count != 0) anticheat_abi.Evidence.replay_hash_reused else 0);
 }
 
-pub fn stableReplayShadowEvidence(passed: bool, suspicious_cadence: bool, replay_content_match_count: u32) u64 {
+pub fn stableReplayShadowEvidence(passed: bool, replay_content_match_count: u32) u64 {
     if (!passed) return 0;
-    return (if (suspicious_cadence) anticheat_abi.Evidence.suspicious_frame_cadence else 0) |
-        (if (replay_content_match_count != 0) anticheat_abi.Evidence.replay_content_reused else 0);
+    return if (replay_content_match_count != 0) anticheat_abi.Evidence.replay_content_reused else 0;
 }
 
 pub fn persistHostAnticheatObservation(self: anytype, user_id: i32, source: storage.AnticheatSource, score_id: ?i64, observation: anticheat_evidence.Observation) void {
@@ -395,21 +396,10 @@ pub fn observeStableGameplay(self: anytype, user_id: i32, score: stable_score.Su
         break :blk 0;
     } else 0;
     const host = if (self.anticheat) |*loaded| loaded else return .none;
-    const cadence = anticheat_replay.frameCadence(prepared.frames);
+    // The module sees source, namespace, mods and the map envelope together.
+    // Only it can select the key-transition-independent cadence review rule.
     const evidence = stableGameplayEvidence(score, replay_match_count) |
-        stableReplayShadowEvidence(score.passed, cadence.suspicious, replay_content_match_count);
-    if (cadence.suspicious) {
-        std.log.warn("event=anticheat_suspicious_frame_cadence user_id={d} passed={} intervals={d} ignored_short={d} dominant_ms={d} dominant={d} distinct={d} duration_ms={d}", .{
-            user_id,
-            score.passed,
-            cadence.interval_count,
-            cadence.ignored_short_intervals,
-            cadence.dominant_interval_ms,
-            cadence.dominant_intervals,
-            cadence.distinct_intervals,
-            cadence.duration_ms,
-        });
-    }
+        stableReplayShadowEvidence(score.passed, replay_content_match_count);
     if (score.passed and replay_content_match_count != 0) {
         std.log.warn("event=anticheat_replay_content_reused user_id={d} cross_account_matches={d}", .{ user_id, replay_content_match_count });
     }

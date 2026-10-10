@@ -1,5 +1,5 @@
 pub const version: u32 = 1;
-pub const rule_revision: u32 = 6;
+pub const rule_revision: u32 = 8;
 
 pub const Status = struct {
     pub const ok: u32 = 0;

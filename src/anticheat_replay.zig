@@ -13,11 +13,6 @@ const mania_max_x: f32 = (1 << 20) - 1;
 const replay_key_mask: u32 = 1 | 2 | 4 | 8 | 16;
 const easy_mod: u64 = 1 << 1;
 const hard_rock_mod: u64 = 1 << 4;
-const minimum_cadence_intervals: u32 = 1_500;
-const minimum_cadence_duration_ms: i64 = 30_000;
-const maximum_cadence_interval_ms = 50;
-const maximum_suspicious_cadence_ms = 13;
-const suspicious_cadence_bps: u64 = 9_900;
 
 pub const Prepared = struct {
     allocator: std.mem.Allocator,
@@ -189,48 +184,6 @@ fn isPreludeFrame(frame: abi.ReplayFrameV1) bool {
     return frame.x == 256 and frame.y == -500;
 }
 
-pub const CadenceSummary = struct {
-    interval_count: u32 = 0,
-    ignored_short_intervals: u32 = 0,
-    dominant_interval_ms: u32 = 0,
-    dominant_intervals: u32 = 0,
-    distinct_intervals: u32 = 0,
-    duration_ms: u32 = 0,
-    suspicious: bool = false,
-};
-
-pub fn frameCadence(frames: []const abi.ReplayFrameV1) CadenceSummary {
-    if (frames.len < 2) return .{};
-    var counts = [_]u32{0} ** (maximum_cadence_interval_ms + 1);
-    var summary: CadenceSummary = .{};
-    for (frames[1..], 1..) |frame, index| {
-        const delta = frame.time_ms - frames[index - 1].time_ms;
-        if (delta <= 2) {
-            summary.ignored_short_intervals += 1;
-            continue;
-        }
-        summary.interval_count += 1;
-        if (delta > maximum_cadence_interval_ms) continue;
-        counts[@intCast(delta)] += 1;
-    }
-    for (counts[3..], 3..) |count, interval| {
-        if (count == 0) continue;
-        summary.distinct_intervals += 1;
-        if (count > summary.dominant_intervals) {
-            summary.dominant_intervals = count;
-            summary.dominant_interval_ms = @intCast(interval);
-        }
-    }
-    const raw_duration = frames[frames.len - 1].time_ms - frames[0].time_ms;
-    if (raw_duration > 0) summary.duration_ms = @intCast(@min(raw_duration, @as(i64, std.math.maxInt(u32))));
-    const all_intervals = @as(u64, summary.interval_count) + summary.ignored_short_intervals;
-    summary.suspicious = summary.interval_count >= minimum_cadence_intervals and
-        raw_duration >= minimum_cadence_duration_ms and
-        summary.dominant_interval_ms <= maximum_suspicious_cadence_ms and
-        @as(u64, summary.dominant_intervals) * 10_000 >= all_intervals * suspicious_cadence_bps;
-    return summary;
-}
-
 pub fn contentDigest(frames: []const abi.ReplayFrameV1) [32]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
     hash.update("zigcho-stable-replay-content-v1\x00");
@@ -358,49 +311,6 @@ test "stable replay input discards backwards frames left after historical repair
     const frames = try parseFrames(std.testing.allocator, "0|0|0|0,10|1|1|0,-3|2|2|0,-20|3|3|0,30|4|4|0,-12345|0|0|1,");
     defer std.testing.allocator.free(frames);
     try std.testing.expectEqualSlices(i64, &.{ 0, 10, 17 }, &.{ frames[0].time_ms, frames[1].time_ms, frames[2].time_ms });
-}
-
-test "frame cadence tolerates sparse one and two millisecond noise" {
-    var frames: [4_001]abi.ReplayFrameV1 = undefined;
-    var time: i64 = 0;
-    frames[0] = .{ .time_ms = time, .x = 0, .y = 0, .keys = 0 };
-    for (frames[1..], 1..) |*frame, index| {
-        time += if (@mod(index, 300) == 0) 2 else 10;
-        frame.* = .{ .time_ms = time, .x = 0, .y = 0, .keys = 0 };
-    }
-    const cadence = frameCadence(&frames);
-    try std.testing.expect(cadence.suspicious);
-    try std.testing.expectEqual(@as(u32, 10), cadence.dominant_interval_ms);
-    try std.testing.expectEqual(@as(u32, 13), cadence.ignored_short_intervals);
-}
-
-test "ordinary uniform sixteen millisecond cadence stays clean" {
-    var frames: [2_001]abi.ReplayFrameV1 = undefined;
-    for (&frames, 0..) |*frame, index| frame.* = .{ .time_ms = @intCast(index * 16), .x = 0, .y = 0, .keys = 0 };
-    const cadence = frameCadence(&frames);
-    try std.testing.expect(!cadence.suspicious);
-    try std.testing.expectEqual(@as(u32, 16), cadence.dominant_interval_ms);
-}
-
-test "frame cadence rejects legitimate multimodal timing" {
-    var frames: [2_001]abi.ReplayFrameV1 = undefined;
-    var time: i64 = 0;
-    frames[0] = .{ .time_ms = time, .x = 0, .y = 0, .keys = 0 };
-    for (frames[1..], 1..) |*frame, index| {
-        time += if (@mod(index, 2) == 0) 16 else 17;
-        frame.* = .{ .time_ms = time, .x = 0, .y = 0, .keys = 0 };
-    }
-    const cadence = frameCadence(&frames);
-    try std.testing.expect(!cadence.suspicious);
-    try std.testing.expectEqual(@as(u32, 2), cadence.distinct_intervals);
-}
-
-test "one and two millisecond intervals cannot signal cadence alone" {
-    var frames: [2_001]abi.ReplayFrameV1 = undefined;
-    for (&frames, 0..) |*frame, index| frame.* = .{ .time_ms = @intCast(index * 2), .x = 0, .y = 0, .keys = 0 };
-    const cadence = frameCadence(&frames);
-    try std.testing.expect(!cadence.suspicious);
-    try std.testing.expectEqual(@as(u32, 0), cadence.interval_count);
 }
 
 test "canonical replay content ignores encoding and physical key aliases" {

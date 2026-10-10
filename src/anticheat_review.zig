@@ -71,7 +71,7 @@ fn reasonInfo(code: u32) ?CodeInfo {
         abi.Reason.rate_anomaly => .{ .name = "rate anomaly", .description = "the client reported a suspicious playback-rate condition" },
         abi.Reason.registry_remnant => .{ .name = "registry remnant", .description = "the Stable client reported a known registry remnant" },
         abi.Reason.duplicate_score => .{ .name = "duplicate score", .description = "the submitted score duplicates an existing score signal" },
-        abi.Reason.suspicious_frame_cadence => .{ .name = "suspicious frame cadence", .description = "a long replay used an unusually uniform single frame interval" },
+        abi.Reason.suspicious_frame_cadence => .{ .name = "frame cadence review", .description = "sustained low frame intervals outside key transitions in a supported complete Stable play; uncalibrated review cue, not proof of timewarp" },
         abi.Reason.relax_keyless_play => .{ .name = "keyless play pattern", .description = "the replay hit objects without the expected physical key input" },
         abi.Reason.relax_timing_lock => .{ .name = "timing lock pattern", .description = "replay hit timing is unusually exact and tightly grouped" },
         abi.Reason.relax_hold_lock => .{ .name = "hold lock pattern", .description = "key hold lengths and alternation are unusually consistent together" },
@@ -110,7 +110,7 @@ const evidence_bits = [_]BitInfo{
     .{ .mask = abi.Evidence.checksum_mismatch, .name = "checksum mismatch", .description = "a submitted checksum signal did not match" },
     .{ .mask = abi.Evidence.rate_anomaly, .name = "rate anomaly", .description = "the client reported an unusual playback rate" },
     .{ .mask = abi.Evidence.replay_content_reused, .name = "replay content reused", .description = "normalized replay content matched another account after volatile metadata was removed" },
-    .{ .mask = abi.Evidence.suspicious_frame_cadence, .name = "suspicious frame cadence", .description = "a long replay used an unusually uniform single frame interval" },
+    .{ .mask = abi.Evidence.suspicious_frame_cadence, .name = "historical host cadence signal", .description = "an older host cadence signal retained for review history; current gameplay uses the private module's context-aware cadence rule" },
 };
 
 const decision_bits = [_]BitInfo{
