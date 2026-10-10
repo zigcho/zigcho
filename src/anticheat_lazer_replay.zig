@@ -1,6 +1,8 @@
 const std = @import("std");
 const replay = @import("anticheat_replay.zig");
 const stable_mods = @import("stable_mods.zig");
+const native_context = @import("anticheat_native_context.zig");
+pub const NativeContext = native_context.Prepared;
 
 // Pinned osu LegacyScoreEncoder writes a complete .osr, not the raw LZMA
 // stream received from Stable. Slices borrow the upload and never outlive it.
@@ -256,6 +258,14 @@ pub fn compatibleMods(mods_json: []const u8) bool {
     return true;
 }
 
+pub fn gameplayContext(allocator: std.mem.Allocator, mods_json: []const u8, map: []const u8) !native_context.Prepared {
+    try boundedJsonDepth(mods_json);
+    const parsed = try std.json.parseFromSlice(std.json.Value, allocator, mods_json, .{});
+    defer parsed.deinit();
+    if (parsed.value != .array or !validModClaims(parsed.value.array.items)) return error.UnsupportedNativeContext;
+    return native_context.derive(parsed.value.array.items, map);
+}
+
 pub fn legacyMods(mods_json: []const u8) !u32 {
     boundedJsonDepth(mods_json) catch return error.InvalidMods;
     const parsed = try std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, mods_json, .{});
@@ -285,6 +295,105 @@ fn nativeLegacyBit(acronym: []const u8) ?i32 {
 pub fn prepare(allocator: std.mem.Allocator, bytes: []const u8, map: []const u8, map_md5: []const u8) !replay.Prepared {
     const info = try payload(bytes, 0, map_md5);
     return replay.prepare(allocator, info.frames, map, info.mods);
+}
+
+const context_test_map = "osu file format v14\n[General]\nMode:0\n[Difficulty]\nCircleSize:4.3\nOverallDifficulty:9.1\nHPDrainRate:6\n[HitObjects]\n256,192,1000,1,0,0:0:0:0:\n";
+
+test "score-bound native context derives configured rate, DA and Classic without rounding exported times" {
+    const implicit = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"DT\"}]", context_test_map);
+    const explicit = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"DT\",\"settings\":{\"speed_change\":1.5,\"adjust_pitch\":false}}]", context_test_map);
+    try std.testing.expectEqualDeep(implicit, explicit);
+    try std.testing.expectEqual(@as(f32, 9.1), implicit.context.approach_rate);
+    try std.testing.expectEqual(@as(f64, 107.5), implicit.context.meh_window_ms);
+    const custom = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"DT\",\"settings\":{\"speed_change\":2}},{\"acronym\":\"DA\",\"settings\":{\"extended_limits\":true,\"circle_size\":11,\"approach_rate\":-10,\"overall_difficulty\":11,\"drain_rate\":null}},{\"acronym\":\"CL\",\"settings\":{\"classic_note_lock\":false}}]", context_test_map);
+    try std.testing.expectEqual(@as(f64, 2), custom.context.clock_rate);
+    try std.testing.expectEqual(@as(f32, 11), custom.context.circle_size);
+    try std.testing.expectEqual(@as(f32, -10), custom.context.approach_rate);
+    try std.testing.expectEqual(@as(f32, 11), custom.context.overall_difficulty);
+    try std.testing.expectEqual(@as(f32, 6), custom.context.drain_rate);
+    try std.testing.expectEqual(@as(f64, 89.5), custom.context.meh_window_ms);
+    try std.testing.expectEqual(@as(u32, 29), custom.context.classic_flags);
+    try std.testing.expectEqual(@as(u32, 1), custom.context.timestamp_basis);
+    try std.testing.expectEqual(@as(u32, 0), custom.context.geometry_basis);
+    try std.testing.expectEqual(@as(usize, 96), @sizeOf(@TypeOf(custom.context)));
+}
+
+test "native difficulty transforms use float multiplication and RX AP preserve manual-family bits" {
+    const hr = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"HR\"},{\"acronym\":\"RX\"}]", context_test_map);
+    try std.testing.expectEqual(@as(f32, 4.3) * @as(f32, 1.3), hr.context.circle_size);
+    try std.testing.expectEqual(@as(f32, 10), hr.context.overall_difficulty);
+    try std.testing.expectEqual(@as(u32, 16 | 128), hr.mods);
+    const easy = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"EZ\"},{\"acronym\":\"AP\"}]", context_test_map);
+    try std.testing.expectEqual(@as(f32, 9.1) * @as(f32, 0.5), easy.context.overall_difficulty);
+    try std.testing.expectEqual(@as(u32, 2 | 8192), easy.mods);
+    const nc = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"NC\",\"settings\":{\"speed_change\":1.01}}]", context_test_map);
+    try std.testing.expectEqual(@as(u32, 512 | 64), nc.mods);
+    try std.testing.expectEqual(@as(f64, 1.01), nc.context.clock_rate);
+    const dc = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"DC\",\"settings\":{\"speed_change\":0.5}}]", context_test_map);
+    try std.testing.expectEqual(@as(u32, 256), dc.mods);
+    try std.testing.expectEqual(@as(f64, 0.5), dc.context.clock_rate);
+}
+
+test "native context refuses unknown settings, illegal combinations and fabricated precision" {
+    const unsupported = [_][]const u8{
+        "[{\"acronym\":\"DT\",\"settings\":{\"speed_change\":1}}]",
+        "[{\"acronym\":\"DT\",\"settings\":{\"speed_change\":1.501}}]",
+        "[{\"acronym\":\"DT\",\"settings\":{\"speed_change\":\"1.5\"}}]",
+        "[{\"acronym\":\"DT\",\"settings\":{\"adjust_pitch\":0}}]",
+        "[{\"acronym\":\"HT\",\"settings\":{\"speed_change\":1}}]",
+        "[{\"acronym\":\"DT\"},{\"acronym\":\"HT\"}]",
+        "[{\"acronym\":\"DT\"},{\"acronym\":\"NC\"}]",
+        "[{\"acronym\":\"EZ\"},{\"acronym\":\"HR\"}]",
+        "[{\"acronym\":\"DA\"},{\"acronym\":\"HR\"}]",
+        "[{\"acronym\":\"DA\"},{\"acronym\":\"EZ\"}]",
+        "[{\"acronym\":\"RX\"},{\"acronym\":\"AP\"}]",
+        "[{\"acronym\":\"DA\",\"settings\":{\"approach_rate\":-1}}]",
+        "[{\"acronym\":\"DA\",\"settings\":{\"overall_difficulty\":11}}]",
+        "[{\"acronym\":\"DA\",\"settings\":{\"overall_difficulty\":7.23}}]",
+        "[{\"acronym\":\"DA\",\"settings\":{\"unknown\":true}}]",
+        "[{\"acronym\":\"CL\",\"settings\":{\"classic_health\":null}}]",
+        "[{\"acronym\":\"CL\",\"settings\":{\"unknown\":true}}]",
+        "[{\"acronym\":\"HD\",\"settings\":{\"speed_change\":1.5}}]",
+        "[{\"acronym\":\"AT\"}]",
+        "[{\"acronym\":\"CN\"}]",
+        "[{\"acronym\":\"TP\"}]",
+        "[{\"acronym\":\"WU\"}]",
+        "[{\"acronym\":\"HDRX\"}]",
+    };
+    for (unsupported) |mods| try std.testing.expectError(error.UnsupportedNativeContext, gameplayContext(std.testing.allocator, mods, context_test_map));
+    try std.testing.expectError(error.UnsupportedNativeContext, gameplayContext(std.testing.allocator, "[]", "not a map"));
+}
+
+test "game host rejects corrupt effective context before calling the module" {
+    const settings = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"DT\",\"settings\":{\"speed_change\":2}}]", context_test_map);
+    const event: @import("anticheat_abi.zig").GameplayEventV1 = .{
+        .base = .{ .client_family = @import("anticheat_abi.zig").ClientFamily.lazer },
+        .mods = settings.mods,
+        .hit_window_ms = @intFromFloat(@ceil(settings.context.meh_window_ms)),
+    };
+    try std.testing.expect(native_context.valid(settings.context, event));
+    inline for (.{ "context_version", "struct_size", "timestamp_basis", "geometry_basis", "classic_present", "classic_flags" }) |field| {
+        var invalid = settings.context;
+        @field(invalid, field) = 99;
+        try std.testing.expect(!native_context.valid(invalid, event));
+    }
+    inline for (.{ "clock_rate", "great_window_ms", "good_window_ms", "meh_window_ms", "miss_window_ms" }) |field| {
+        var invalid = settings.context;
+        @field(invalid, field) = std.math.nan(f64);
+        try std.testing.expect(!native_context.valid(invalid, event));
+    }
+    var invalid = settings.context;
+    invalid.reserved[0] = 1;
+    try std.testing.expect(!native_context.valid(invalid, event));
+    var bad_event = event;
+    bad_event.hit_window_ms -= 1;
+    try std.testing.expect(!native_context.valid(settings.context, bad_event));
+    bad_event = event;
+    bad_event.mods |= 1 << 8;
+    try std.testing.expect(!native_context.valid(settings.context, bad_event));
+    bad_event = event;
+    bad_event.base.client_family = @import("anticheat_abi.zig").ClientFamily.stable;
+    try std.testing.expect(!native_context.valid(settings.context, bad_event));
 }
 
 test "lazer full replay framing is bounded and tied to the resolved map" {

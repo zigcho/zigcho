@@ -78,6 +78,36 @@ fn checkGameplayRevision(host: *anticheat.Host) !void {
     if ((try host.evaluateGameplay(event)).decision.reason == abi.Reason.suspicious_frame_cadence) return error.KeyTransitionCadenceDecision;
 }
 
+fn checkGameplayContext(host: *anticheat.Host) !void {
+    const objects = [_]abi.HitObjectV1{.{ .time_ms = 1000, .x = 256, .y = 192, .kind = abi.HitObjectKind.circle }};
+    var frames = [_]abi.ReplayFrameV1{
+        .{ .time_ms = 0, .x = 256, .y = 192, .keys = 0 },
+        .{ .time_ms = 1149, .x = 256, .y = 192, .keys = 4 },
+    };
+    const event: abi.GameplayEventV1 = .{
+        .base = .{ .event_kind = abi.EventKind.score, .client_family = abi.ClientFamily.lazer, .namespace = abi.Namespace.vanilla, .map_objects = 1, .n300 = 1 },
+        .mods = 1 << 6,
+        .passed_hits = 1,
+        .hit_window_ms = 150,
+        .frames = &frames,
+        .frame_count = frames.len,
+        .objects = &objects,
+        .object_count = objects.len,
+    };
+    const context: abi.GameplayContextV1 = .{ .clock_rate = 2, .approach_rate = -10, .circle_size = 11, .classic_present = 1, .classic_flags = 3 };
+    const inside = try host.evaluateGameplayContext(event, context);
+    if (inside.timing_samples != 1 or inside.mean_abs_timing_error_milli != 149000) return error.UnexpectedContextTiming;
+    frames[1].time_ms = 1150;
+    const outside = try host.evaluateGameplayContext(event, context);
+    if (outside.timing_samples != 0 or outside.matched_clicks != 0) return error.RoundedContextWindow;
+    var invalid = context;
+    invalid.geometry_basis = 1;
+    if (host.evaluateGameplayContext(event, invalid)) |_| return error.GuessedCoordinateBasis else |err| {
+        if (err != error.InvalidEvent) return err;
+    }
+    std.debug.print("gameplay_context=1\n", .{});
+}
+
 pub fn main(init: std.process.Init) !void {
     const allocator = std.heap.smp_allocator;
     const args = try init.minimal.args.toSlice(allocator);
@@ -90,6 +120,7 @@ pub fn main(init: std.process.Init) !void {
     defer host.close();
     if (host.ruleRevision() != abi.rule_revision) return error.UnexpectedRuleRevision;
     try checkGameplayRevision(&host);
+    try checkGameplayContext(&host);
     const decision = try host.evaluate(.{
         .event_kind = abi.EventKind.score,
         .client_family = abi.ClientFamily.stable,

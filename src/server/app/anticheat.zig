@@ -163,8 +163,9 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
     };
     defer prepared.deinit();
     const host = if (self.anticheat) |*loaded| loaded else return .none;
-    const supported = lazer_replay.compatibleMods(mods_json);
-    const authoritative_mods = if (supported) lazer_replay.legacyMods(mods_json) catch return .none else info.mods;
+    const native: ?lazer_replay.NativeContext = lazer_replay.gameplayContext(self.allocator, mods_json, map) catch |err| if (err == error.OutOfMemory) return .unavailable else null;
+    const supported = native != null;
+    const authoritative_mods = if (native) |settings| settings.mods else info.mods;
     // Never let a replay header claim RX/AP while the authenticated submission
     // says otherwise, or select different difficulty transforms for analysis.
     if (supported and (info.mods & ((1 << 1) | (1 << 4) | (1 << 7) | (1 << 13))) != (authoritative_mods & ((1 << 1) | (1 << 4) | (1 << 7) | (1 << 13)))) return .invalid_replay;
@@ -197,16 +198,16 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
     };
     var result: anticheat_abi.GameplayResultV2 = .{};
     if (supported) {
-        result = host.evaluateGameplay(.{
+        result = host.evaluateGameplayContext(.{
             .base = base,
             .mods = authoritative_mods,
             .passed_hits = base.n300 +| base.n100 +| base.n50,
-            .hit_window_ms = prepared.hit_window_ms,
+            .hit_window_ms = @intFromFloat(@ceil(native.?.context.meh_window_ms)),
             .frames = prepared.frames.ptr,
             .frame_count = @intCast(prepared.frames.len),
             .objects = prepared.objects.ptr,
             .object_count = @intCast(prepared.objects.len),
-        }) catch |err| {
+        }, native.?.context) catch |err| {
             std.log.warn("event=anticheat_lazer_evaluation_failed user_id={d} error={t}", .{ user_id, err });
             return .none;
         };

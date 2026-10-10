@@ -1,6 +1,6 @@
 const std = @import("std");
 pub const version: u32 = 1;
-pub const rule_revision: u32 = 9;
+pub const rule_revision: u32 = 10;
 
 pub const Status = struct {
     pub const ok: u32 = 0;
@@ -10,6 +10,8 @@ pub const Status = struct {
     pub const event_too_small: u32 = 4;
     pub const invalid_gameplay_data: u32 = 5;
     pub const invalid_event_data: u32 = 6;
+    pub const null_gameplay_context: u32 = 7;
+    pub const invalid_gameplay_context: u32 = 8;
 };
 
 pub const EventKind = struct {
@@ -192,6 +194,37 @@ pub const GameplayEventV1 = extern struct {
     objects: ?[*]const HitObjectV1 = null,
     object_count: u32 = 0,
     reserved: [6]u64 = [_]u64{0} ** 6,
+};
+
+// Independently negotiated metadata. Replay timestamps and result timing/hold
+// fields keep their integer exported game-clock units; never apply clock_rate
+// to the frame buffer. Context is derived from bound score claims + exact map.
+pub const GameplayContextV1 = extern struct {
+    context_version: u32 = 1,
+    struct_size: u32 = @sizeOf(GameplayContextV1),
+    timestamp_basis: u32 = 1,
+    classic_flags: u32 = 0,
+    clock_rate: f64 = 1,
+    circle_size: f32 = 5,
+    approach_rate: f32 = 5,
+    overall_difficulty: f32 = 5,
+    drain_rate: f32 = 5,
+    great_window_ms: f64 = 49.5,
+    good_window_ms: f64 = 99.5,
+    meh_window_ms: f64 = 149.5,
+    miss_window_ms: f64 = 400,
+    geometry_basis: u32 = 0,
+    classic_present: u32 = 0,
+    reserved: [2]u64 = [_]u64{0} ** 2,
+};
+
+pub const ClassicFlag = struct {
+    pub const no_slider_head_accuracy: u32 = 1 << 0;
+    pub const classic_note_lock: u32 = 1 << 1;
+    pub const always_play_tail_sample: u32 = 1 << 2;
+    pub const fade_hit_circle_early: u32 = 1 << 3;
+    pub const classic_health: u32 = 1 << 4;
+    pub const known_mask: u32 = (1 << 5) - 1;
 };
 
 pub const GameplayResultV1 = extern struct {

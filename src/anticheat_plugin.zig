@@ -1,5 +1,6 @@
 const std = @import("std");
 const abi = @import("anticheat_abi.zig");
+const native_context = @import("anticheat_native_context.zig");
 
 const AbiVersionFn = *const fn () callconv(.c) u32;
 const RuleRevisionFn = *const fn () callconv(.c) u32;
@@ -7,6 +8,7 @@ const SizeFn = *const fn () callconv(.c) u32;
 const NameFn = *const fn () callconv(.c) ?[*:0]const u8;
 const EvaluateFn = *const fn (?*const abi.EventV1, ?*abi.DecisionV1) callconv(.c) u32;
 const EvaluateGameplayFn = *const fn (?*const abi.GameplayEventV1, ?*abi.GameplayResultV2) callconv(.c) u32;
+const EvaluateContextFn = *const fn (?*const abi.GameplayEventV1, ?*const abi.GameplayContextV1, ?*abi.GameplayResultV2) callconv(.c) u32;
 
 const max_match_count: u32 = 100_000;
 const max_frames: u32 = 2_000_000;
@@ -125,6 +127,7 @@ pub const Host = struct {
     rule_revision: u32,
     evaluate_fn: EvaluateFn,
     evaluate_gameplay_fn: EvaluateGameplayFn,
+    evaluate_context_fn: EvaluateContextFn,
 
     pub fn open(path: []const u8) !Host {
         if (path.len == 0 or path.len > 4096 or std.mem.indexOfScalar(u8, path, 0) != null) return error.InvalidModulePath;
@@ -140,13 +143,17 @@ pub const Host = struct {
         const name_fn = library.lookup(NameFn, "zigcho_anticheat_name") orelse return error.MissingName;
         const evaluate_fn = library.lookup(EvaluateFn, "zigcho_anticheat_evaluate_v1") orelse return error.MissingEvaluator;
         const evaluate_gameplay_fn = library.lookup(EvaluateGameplayFn, "zigcho_anticheat_evaluate_gameplay_v2") orelse return error.MissingGameplayEvaluator;
+        const context_version = library.lookup(SizeFn, "zigcho_anticheat_gameplay_context_version") orelse return error.MissingGameplayContext;
+        const context_size = library.lookup(SizeFn, "zigcho_anticheat_gameplay_context_size_v1") orelse return error.MissingGameplayContext;
+        const evaluate_context_fn = library.lookup(EvaluateContextFn, "zigcho_anticheat_evaluate_gameplay_context_v1") orelse return error.MissingGameplayContext;
 
         if (abi_version() != abi.version) return error.UnsupportedAbi;
         const rule_revision = rule_revision_fn();
         if (rule_revision != abi.rule_revision) return error.UnsupportedRuleRevision;
         if (event_size() != @sizeOf(abi.EventV1) or decision_size() != @sizeOf(abi.DecisionV1) or
             gameplay_event_size() != @sizeOf(abi.GameplayEventV1) or gameplay_result_size() != @sizeOf(abi.GameplayResultV1) or
-            gameplay_result_v2_size() != @sizeOf(abi.GameplayResultV2)) return error.LayoutMismatch;
+            gameplay_result_v2_size() != @sizeOf(abi.GameplayResultV2) or context_version() != 1 or
+            context_size() != @sizeOf(abi.GameplayContextV1)) return error.LayoutMismatch;
         const module_name_pointer = name_fn() orelse return error.InvalidModuleName;
         const bounded_name = module_name_pointer[0..65];
         const module_name_end = std.mem.indexOfScalar(u8, bounded_name, 0) orelse return error.InvalidModuleName;
@@ -158,6 +165,7 @@ pub const Host = struct {
             .rule_revision = rule_revision,
             .evaluate_fn = evaluate_fn,
             .evaluate_gameplay_fn = evaluate_gameplay_fn,
+            .evaluate_context_fn = evaluate_context_fn,
         };
     }
 
@@ -187,6 +195,16 @@ pub const Host = struct {
         try validateGameplayEvent(event);
         var result: abi.GameplayResultV2 = .{};
         if (self.evaluate_gameplay_fn(&event, &result) != abi.Status.ok) return error.ModuleRejectedEvent;
+        try validateGameplayResultV2(event, result);
+        if (result.decision.rule_revision != self.rule_revision) return error.RuleRevisionMismatch;
+        return result;
+    }
+
+    pub fn evaluateGameplayContext(self: Host, event: abi.GameplayEventV1, context: abi.GameplayContextV1) !abi.GameplayResultV2 {
+        try validateGameplayEvent(event);
+        if (!native_context.valid(context, event)) return error.InvalidEvent;
+        var result: abi.GameplayResultV2 = .{};
+        if (self.evaluate_context_fn(&event, &context, &result) != abi.Status.ok) return error.ModuleRejectedEvent;
         try validateGameplayResultV2(event, result);
         if (result.decision.rule_revision != self.rule_revision) return error.RuleRevisionMismatch;
         return result;
