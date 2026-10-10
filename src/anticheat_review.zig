@@ -249,9 +249,11 @@ fn writeMetrics(writer: *std.Io.Writer, metrics: Metrics) !void {
             try writeSupportedMetric(writer, &first, "timing_spread", "timing spread", metrics.timing_stddev_milli, try fixedMilli(metrics.timing_stddev_milli, " ms", &buf), "sample standard deviation of eligible single-onset timing; requires at least two samples", spread_available);
             try writeSupportedMetric(writer, &first, "exact_timing", "exact timing", metrics.exact_timing_bps, try fixedTwo(metrics.exact_timing_bps, 100, "%", &buf), "share of eligible single-onset timing samples within one millisecond; denominator is timing samples, not all temporal matches", timing_available);
         }
-        try writeMetric(writer, &first, "centre_hits", "centre hits", metrics.center_hits_bps, try fixedTwo(metrics.center_hits_bps, 100, "%", &buf), "share of checked objects landed within one pixel of centre");
-        try writeMetric(writer, &first, "mean_centre_distance", "mean centre distance", metrics.mean_center_distance_milli, try fixedMilli(metrics.mean_center_distance_milli, " px", &buf), "mean cursor distance from object centre at object time");
-        try writeMetric(writer, &first, "snap_events", "snap events", metrics.snap_events, try std.fmt.bufPrint(&buf, "{d}", .{metrics.snap_events}), "fast approaches that finish very close to object centre");
+        // The host has no reliable stacked/mod-transformed target contract yet.
+        // Its gated zero values must not look like measured perfect aim.
+        try writeSupportedMetric(writer, &first, "centre_hits", "centre hits", metrics.center_hits_bps, try fixedTwo(metrics.center_hits_bps, 100, "%", &buf), "unavailable: stacked and mod-transformed targets were not verified by this host contract; raw value retained", false);
+        try writeSupportedMetric(writer, &first, "mean_centre_distance", "mean centre distance", metrics.mean_center_distance_milli, try fixedMilli(metrics.mean_center_distance_milli, " px", &buf), "unavailable: target-coordinate basis was not verified; gated zeros are not centre-perfect landings", false);
+        try writeSupportedMetric(writer, &first, "snap_events", "snap events", metrics.snap_events, try std.fmt.bufPrint(&buf, "{d}", .{metrics.snap_events}), "unavailable: approaches relative to targets require a reliable target-coordinate basis", false);
         try writeMetric(writer, &first, "key_presses", "logical presses", metrics.key_press_count, try std.fmt.bufPrint(&buf, "{d}", .{metrics.key_press_count}), "logical lane onsets in replay key states, with keyboard/mouse aliases collapsed; not hardware evidence");
         try writeMetric(writer, &first, "key_holds", "key holds", metrics.key_hold_count, try std.fmt.bufPrint(&buf, "{d}", .{metrics.key_hold_count}), "key presses with a measurable release");
         if (metrics.key_hold_count != 0) {
@@ -261,7 +263,7 @@ fn writeMetrics(writer: *std.Io.Writer, metrics: Metrics) !void {
         const opportunities: ?u32 = if (basis) |known| known.alternation_opportunities else null;
         try writeSupportedMetric(writer, &first, "alternation_opportunities", "alternation opportunities", opportunities, try std.fmt.bufPrint(&buf, "{d}", .{opportunities orelse 0}), "adjacent unambiguous single onsets eligible for lane comparison; simultaneous onsets break the sequence", opportunities != null);
         try writeSupportedMetric(writer, &first, "alternation", "key alternation", metrics.alternation_bps, try fixedTwo(metrics.alternation_bps, 100, "%", &buf), "share of eligible alternation opportunities that switch input lanes; requires a recorded nonzero denominator", if (opportunities) |count| count > 0 else false);
-        try writeMetric(writer, &first, "target_distance_spread", "target distance spread", metrics.target_distance_stddev_milli, try fixedMilli(metrics.target_distance_stddev_milli, " px", &buf), "standard deviation of cursor distance from object centres");
+        try writeSupportedMetric(writer, &first, "target_distance_spread", "target distance spread", metrics.target_distance_stddev_milli, try fixedMilli(metrics.target_distance_stddev_milli, " px", &buf), "unavailable: target-coordinate basis was not verified; gated zero is not a radial lock", false);
         try writeMetric(writer, &first, "velocity_spikes", "velocity spikes", metrics.velocity_spike_count, try std.fmt.bufPrint(&buf, "{d}", .{metrics.velocity_spike_count}), "large cursor-speed changes found between replay frames");
         try writeMetric(writer, &first, "velocity_spread", "velocity spread", metrics.movement_velocity_stddev_milli, try std.fmt.bufPrint(&buf, "{d} px/s", .{metrics.movement_velocity_stddev_milli}), "standard deviation of cursor movement velocity; the ABI stores px/ms multiplied by 1000, which is numerically px/s");
     }
@@ -386,6 +388,9 @@ test "review timing and alternation require their recorded denominators" {
                 try std.testing.expectEqual(if (basis) |known| known.timing_samples > 1 else false, available);
             if (std.mem.eql(u8, key, "alternation"))
                 try std.testing.expectEqual(if (basis) |known| known.alternation_opportunities > 0 else false, available);
+            if (std.mem.eql(u8, key, "centre_hits") or std.mem.eql(u8, key, "mean_centre_distance") or
+                std.mem.eql(u8, key, "snap_events") or std.mem.eql(u8, key, "target_distance_spread"))
+                try std.testing.expect(!available);
             if (std.mem.eql(u8, key, "timing_samples") and basis == null)
                 try std.testing.expect(metric.object.get("raw").? == .null);
             if (!available) try std.testing.expectEqualStrings("unavailable", metric.object.get("display").?.string);
