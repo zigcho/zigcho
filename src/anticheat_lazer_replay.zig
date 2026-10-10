@@ -170,17 +170,29 @@ fn sameStatistics(left: std.json.ObjectMap, right: std.json.ObjectMap) bool {
     return true;
 }
 
-fn sameMods(left: []const std.json.Value, right: []const std.json.Value) bool {
-    if (left.len != right.len or left.len > 64) return false;
-    for (left, 0..) |mod, index| {
+fn validModClaims(mods: []const std.json.Value) bool {
+    if (mods.len > 64) return false;
+    for (mods, 0..) |mod, index| {
         if (mod != .object) return false;
         const acronym = mod.object.get("acronym") orelse return false;
-        if (acronym != .string) return false;
+        if (acronym != .string or acronym.string.len == 0 or acronym.string.len > 8) return false;
+        for (acronym.string) |byte| if (!std.ascii.isAlphanumeric(byte)) return false;
+        if (mod.object.get("settings")) |settings| {
+            if (settings != .null and settings != .object) return false;
+        }
         // Reject ambiguous duplicate acronyms, including identical duplicates.
-        for (left[0..index]) |previous| {
+        for (mods[0..index]) |previous| {
             const name = previous.object.get("acronym") orelse return false;
             if (sameJson(name, acronym)) return false;
         }
+    }
+    return true;
+}
+
+fn sameMods(left: []const std.json.Value, right: []const std.json.Value) bool {
+    if (left.len != right.len or !validModClaims(left) or !validModClaims(right)) return false;
+    for (left) |mod| {
+        const acronym = mod.object.get("acronym").?;
         var matches: usize = 0;
         for (right) |other| {
             if (other != .object) return false;
@@ -226,9 +238,10 @@ fn sameJson(left: std.json.Value, right: std.json.Value) bool {
 // ABI v1 cannot describe DA, automatic input, transforms, variable rates or
 // arbitrary mod settings. Never interpret these as hidden Relax or timewarp.
 pub fn compatibleMods(mods_json: []const u8) bool {
+    boundedJsonDepth(mods_json) catch return false;
     const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, mods_json, .{}) catch return false;
     defer parsed.deinit();
-    if (parsed.value != .array) return false;
+    if (parsed.value != .array or !validModClaims(parsed.value.array.items)) return false;
     for (parsed.value.array.items) |value| {
         if (value != .object) return false;
         const acronym = value.object.get("acronym") orelse return false;
@@ -237,26 +250,36 @@ pub fn compatibleMods(mods_json: []const u8) bool {
             if (settings != .null and (settings != .object or settings.object.count() != 0)) return false;
         }
         if (std.mem.eql(u8, acronym.string, "CL")) continue;
-        if (stable_mods.parseCompact(acronym.string) == null) return false;
+        if (nativeLegacyBit(acronym.string) == null) return false;
         if (std.mem.eql(u8, acronym.string, "AT") or std.mem.eql(u8, acronym.string, "CN") or std.mem.eql(u8, acronym.string, "TP")) return false;
     }
     return true;
 }
 
 pub fn legacyMods(mods_json: []const u8) !u32 {
+    boundedJsonDepth(mods_json) catch return error.InvalidMods;
     const parsed = try std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, mods_json, .{});
     defer parsed.deinit();
-    if (parsed.value != .array) return error.InvalidMods;
+    if (parsed.value != .array or !validModClaims(parsed.value.array.items)) return error.InvalidMods;
     var bits: u32 = 0;
     for (parsed.value.array.items) |value| {
         if (value != .object) return error.InvalidMods;
         const acronym = value.object.get("acronym") orelse return error.InvalidMods;
         if (acronym != .string) return error.InvalidMods;
         if (std.mem.eql(u8, acronym.string, "CL")) continue;
-        const mask = stable_mods.parseCompact(acronym.string) orelse return error.InvalidMods;
+        const mask = nativeLegacyBit(acronym.string) orelse return error.InvalidMods;
         bits |= @intCast(mask);
     }
     return bits;
+}
+
+fn nativeLegacyBit(acronym: []const u8) ?i32 {
+    // Native JSON contains one canonical acronym per object, not Stable's
+    // concatenated compact string. In particular "HDRX" cannot hide two mods,
+    // and a lower-case "at" cannot evade the named automatic-input exclusion.
+    if (acronym.len != 2) return null;
+    for (acronym) |byte| if (std.ascii.isLower(byte)) return null;
+    return stable_mods.parseCompact(acronym);
 }
 
 pub fn prepare(allocator: std.mem.Allocator, bytes: []const u8, map: []const u8, map_md5: []const u8) !replay.Prepared {
@@ -388,4 +411,86 @@ test "native default mods and sparse zeros are equivalent but duplicate mods are
 test "native verifier propagates allocator exhaustion instead of accepting unchecked" {
     var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
     try std.testing.expectError(error.OutOfMemory, validateSoloJson(failing.allocator(), solo_fixture, null));
+}
+
+test "native mod shape cannot be valid just because both claims are equally malformed" {
+    for ([_][]const u8{
+        "[null]",                                   "[false]",                                "[{}]",                                      "[{\"acronym\":2}]",                        "[{\"acronym\":\"\"}]",
+        "[{\"acronym\":\"HD HR\"}]",                "[{\"acronym\":\"ABCDEFGHI\"}]",          "[{\"acronym\":\"DT\",\"settings\":false}]", "[{\"acronym\":\"DT\",\"settings\":true}]", "[{\"acronym\":\"DT\",\"settings\":0}]",
+        "[{\"acronym\":\"DT\",\"settings\":\"\"}]", "[{\"acronym\":\"DT\",\"settings\":[]}]",
+    }) |json| {
+        const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+        defer parsed.deinit();
+        try std.testing.expect(!sameMods(parsed.value.array.items, parsed.value.array.items));
+        try std.testing.expect(!compatibleMods(json));
+        try std.testing.expectError(error.InvalidMods, legacyMods(json));
+    }
+    const json = "{\"statistics\":{},\"mods\":[{\"acronym\":\"DT\",\"settings\":false}]}";
+    const claims = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+    defer claims.deinit();
+    try std.testing.expectError(error.ReplayScoreMismatch, validateSoloJson(std.testing.allocator, json, .{
+        .statistics = claims.value.object.get("statistics").?.object,
+        .mods = claims.value.object.get("mods").?.array,
+    }));
+}
+
+test "native standalone projection rejects duplicate and compound acronyms" {
+    for ([_][]const u8{
+        "[{\"acronym\":\"HD\"},{\"acronym\":\"HD\"}]",
+        "[{\"acronym\":\"CL\"},{\"acronym\":\"CL\"}]",
+        "[{\"acronym\":\"DT\"},{\"acronym\":\"DT\",\"settings\":{}}]",
+        "[{\"acronym\":\"HDRX\"}]",
+        "[{\"acronym\":\"HDRXAT\"}]",
+        "[{\"acronym\":\"rx\"}]",
+        "[{\"acronym\":\"at\"}]",
+    }) |json| {
+        try std.testing.expect(!compatibleMods(json));
+        try std.testing.expectError(error.InvalidMods, legacyMods(json));
+    }
+    // Stable's compact parser is unchanged; it is simply not native JSON.
+    try std.testing.expectEqual(@as(?i32, stable_mods.hidden | stable_mods.relax), stable_mods.parseCompact("HDRX"));
+}
+
+test "native valid defaults and future settings retain claim equality without invented ABI support" {
+    for ([_][]const u8{
+        "[]",                                     "[{\"acronym\":\"HD\"}]",                      "[{\"acronym\":\"HD\",\"settings\":null}]",
+        "[{\"acronym\":\"HD\",\"settings\":{}}]", "[{\"acronym\":\"RX\"},{\"acronym\":\"NC\"}]", "[{\"acronym\":\"AP\"},{\"acronym\":\"HT\"},{\"acronym\":\"CL\"}]",
+    }) |json| {
+        try std.testing.expect(compatibleMods(json));
+        _ = try legacyMods(json);
+    }
+    for ([_][]const u8{
+        "[{\"acronym\":\"DT\",\"settings\":{\"speed_change\":1.5}}]",
+        "[{\"acronym\":\"DT\",\"settings\":{\"speed_change\":2}}]",
+        "[{\"acronym\":\"DA\",\"settings\":{\"circle_size\":5}}]",
+        "[{\"acronym\":\"NEW\",\"settings\":{\"future\":true}}]",
+    }) |json| {
+        const parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, json, .{});
+        defer parsed.deinit();
+        try std.testing.expect(sameMods(parsed.value.array.items, parsed.value.array.items));
+        try std.testing.expect(!compatibleMods(json));
+    }
+    try std.testing.expectEqual(@as(u32, stable_mods.relax | stable_mods.nightcore | stable_mods.double_time), try legacyMods("[{\"acronym\":\"RX\"},{\"acronym\":\"NC\"}]"));
+}
+
+test "native direct mod helpers respect bounded list and JSON depth contracts" {
+    var names: [65][8]u8 = undefined;
+    var mods: [65]std.json.Value = @splat(.{ .object = .{} });
+    defer for (&mods) |*mod| mod.object.deinit(std.testing.allocator);
+    for (&mods, 0..) |*mod, index| {
+        const name = try std.fmt.bufPrint(&names[index], "X{d}", .{index});
+        try mod.object.put(std.testing.allocator, "acronym", .{ .string = name });
+    }
+    try std.testing.expect(validModClaims(mods[0..64]));
+    try std.testing.expect(!validModClaims(&mods));
+    var deep: [66]u8 = undefined;
+    @memset(deep[0..33], '[');
+    @memset(deep[33..], ']');
+    try std.testing.expect(!compatibleMods(&deep));
+    try std.testing.expectError(error.InvalidMods, legacyMods(&deep));
+    const too_big = try std.testing.allocator.alloc(u8, 1024 * 1024 + 1);
+    defer std.testing.allocator.free(too_big);
+    @memset(too_big, ' ');
+    try std.testing.expect(!compatibleMods(too_big));
+    try std.testing.expectError(error.InvalidMods, legacyMods(too_big));
 }
