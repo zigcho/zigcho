@@ -324,7 +324,7 @@ test "native base map difficulty clamps float32 before HR EZ and nullable DA" {
 
 test "native base map difficulty still rejects non-finite malformed and float32 overflow" {
     for ([_][]const u8{ "CircleSize", "ApproachRate", "OverallDifficulty", "HPDrainRate" }) |key| {
-        for ([_][]const u8{ "nan", "inf", "-inf", "1e40", "bad" }) |value| {
+        for ([_][]const u8{ "nan", "inf", "-inf", "1e30", "-1e30", "1e40", "bad" }) |value| {
             const map = try std.fmt.allocPrint(std.testing.allocator, "osu file format v14\n[Difficulty]\n{s}:{s}\n", .{ key, value });
             defer std.testing.allocator.free(map);
             try std.testing.expectError(error.UnsupportedNativeContext, gameplayContext(std.testing.allocator, "[]", map));

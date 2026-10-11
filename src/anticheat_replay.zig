@@ -252,7 +252,7 @@ fn parseMap(allocator: std.mem.Allocator, map: []const u8, mods: u64, played_to_
             .difficulty => if (valueFor(line, "OverallDifficulty")) |value| {
                 if (native_difficulty) {
                     const native_od = std.fmt.parseFloat(f32, value) catch return error.InvalidBeatmap;
-                    if (!std.math.isFinite(native_od)) return error.InvalidBeatmap;
+                    if (!std.math.isFinite(native_od) or @abs(native_od) > @as(f32, 2_147_483_648)) return error.InvalidBeatmap;
                     overall_difficulty = std.math.clamp(native_od, @as(f32, 0), @as(f32, 10));
                 } else {
                     overall_difficulty = std.fmt.parseFloat(f64, value) catch return error.InvalidBeatmap;
@@ -366,7 +366,7 @@ test "native map preparation clamps finite base OD without changing Stable windo
         try std.testing.expectEqual(@as(u32, 1), parsed.map_object_count);
         try std.testing.expectError(error.InvalidBeatmap, parseMap(std.testing.allocator, map, 0, 2000, false));
     }
-    for ([_][]const u8{ "nan", "inf", "-inf", "1e40", "bad" }) |value| {
+    for ([_][]const u8{ "nan", "inf", "-inf", "1e30", "-1e30", "1e40", "bad" }) |value| {
         const map = try std.fmt.allocPrint(std.testing.allocator, "osu file format v14\n[General]\nMode:0\n[Difficulty]\nOverallDifficulty:{s}\n[HitObjects]\n256,192,1000,1,0,0:0:0:0:\n", .{value});
         defer std.testing.allocator.free(map);
         try std.testing.expectError(error.InvalidBeatmap, parseMap(std.testing.allocator, map, 0, 2000, true));

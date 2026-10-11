@@ -83,7 +83,8 @@ fn mapDifficulty(map: []const u8) !abi.GameplayContextV1 {
         const field: ?*f32 = if (std.mem.eql(u8, key, "CircleSize")) &context.circle_size else if (std.mem.eql(u8, key, "OverallDifficulty")) &context.overall_difficulty else if (std.mem.eql(u8, key, "HPDrainRate")) &context.drain_rate else null;
         if (field == null and !std.mem.eql(u8, key, "ApproachRate")) continue;
         const value = std.fmt.parseFloat(f32, std.mem.trim(u8, line[colon + 1 ..], " \t")) catch return error.UnsupportedNativeContext;
-        if (!std.math.isFinite(value)) return error.UnsupportedNativeContext;
+        // Parsing.ParseFloat's (float)int.MaxValue limit rounds to 2^31.
+        if (!std.math.isFinite(value) or @abs(value) > @as(f32, 2_147_483_648)) return error.UnsupportedNativeContext;
         // LegacyBeatmapDecoder clamps float32 base difficulty before mods.
         // DA settings are a separate validated override, not map limits.
         const bounded = std.math.clamp(value, @as(f32, 0), @as(f32, 10));
