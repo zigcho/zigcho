@@ -294,10 +294,43 @@ fn nativeLegacyBit(acronym: []const u8) ?i32 {
 
 pub fn prepare(allocator: std.mem.Allocator, bytes: []const u8, map: []const u8, map_md5: []const u8) !replay.Prepared {
     const info = try payload(bytes, 0, map_md5);
-    return replay.prepare(allocator, info.frames, map, info.mods);
+    return replay.prepareNative(allocator, info.frames, map, info.mods);
 }
 
 const context_test_map = "osu file format v14\n[General]\nMode:0\n[Difficulty]\nCircleSize:4.3\nOverallDifficulty:9.1\nHPDrainRate:6\n[HitObjects]\n256,192,1000,1,0,0:0:0:0:\n";
+
+test "native base map difficulty clamps float32 before HR EZ and nullable DA" {
+    const map = "osu file format v14\n[General]\nMode:0\n[Difficulty]\nCircleSize:19.5\nOverallDifficulty:-1\nHPDrainRate:11\n[HitObjects]\n256,192,1000,1,0,0:0:0:0:\n";
+    const base = try gameplayContext(std.testing.allocator, "[]", map);
+    try std.testing.expectEqual(@as(f32, 10), base.context.circle_size);
+    try std.testing.expectEqual(@as(f32, 0), base.context.overall_difficulty);
+    try std.testing.expectEqual(@as(f32, 0), base.context.approach_rate);
+    try std.testing.expectEqual(@as(f32, 10), base.context.drain_rate);
+    try std.testing.expectEqual(@as(f64, 199.5), base.context.meh_window_ms);
+    const easy = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"EZ\"}]", map);
+    try std.testing.expectEqual(@as(f32, 5), easy.context.circle_size);
+    try std.testing.expectEqual(@as(f32, 5), easy.context.drain_rate);
+    const hr = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"HR\"}]", map);
+    try std.testing.expectEqual(@as(f32, 10), hr.context.circle_size);
+    try std.testing.expectEqual(@as(f32, 0), hr.context.approach_rate);
+    const da = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"DA\",\"settings\":{\"circle_size\":null,\"extended_limits\":true,\"approach_rate\":-10,\"overall_difficulty\":11}}]", map);
+    try std.testing.expectEqual(@as(f32, 10), da.context.circle_size);
+    try std.testing.expectEqual(@as(f32, -10), da.context.approach_rate);
+    try std.testing.expectEqual(@as(f32, 11), da.context.overall_difficulty);
+    const explicit_ar = try gameplayContext(std.testing.allocator, "[]", "osu file format v14\n[Difficulty]\nApproachRate:19.5\nOverallDifficulty:-1\nOverallDifficulty:7.3\n");
+    try std.testing.expectEqual(@as(f32, 10), explicit_ar.context.approach_rate);
+    try std.testing.expectEqual(@as(f32, 7.3), explicit_ar.context.overall_difficulty);
+}
+
+test "native base map difficulty still rejects non-finite malformed and float32 overflow" {
+    for ([_][]const u8{ "CircleSize", "ApproachRate", "OverallDifficulty", "HPDrainRate" }) |key| {
+        for ([_][]const u8{ "nan", "inf", "-inf", "1e40", "bad" }) |value| {
+            const map = try std.fmt.allocPrint(std.testing.allocator, "osu file format v14\n[Difficulty]\n{s}:{s}\n", .{ key, value });
+            defer std.testing.allocator.free(map);
+            try std.testing.expectError(error.UnsupportedNativeContext, gameplayContext(std.testing.allocator, "[]", map));
+        }
+    }
+}
 
 test "score-bound native context derives configured rate, DA and Classic without rounding exported times" {
     const implicit = try gameplayContext(std.testing.allocator, "[{\"acronym\":\"DT\"}]", context_test_map);

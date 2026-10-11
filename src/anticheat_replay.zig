@@ -41,13 +41,23 @@ const ParsedMap = struct {
 };
 
 pub fn prepare(allocator: std.mem.Allocator, replay: []const u8, map: []const u8, mods: u64) !Prepared {
+    return prepareWithDifficulty(allocator, replay, map, mods, false);
+}
+
+// Native legacy-map decoding uses float32 base difficulty and restrictions.
+// Keep the context-free Stable path's existing window contract separate.
+pub fn prepareNative(allocator: std.mem.Allocator, replay: []const u8, map: []const u8, mods: u64) !Prepared {
+    return prepareWithDifficulty(allocator, replay, map, mods, true);
+}
+
+fn prepareWithDifficulty(allocator: std.mem.Allocator, replay: []const u8, map: []const u8, mods: u64, native_difficulty: bool) !Prepared {
     if (replay.len == 0 or replay.len > 16 * 1024 * 1024) return error.InvalidReplay;
     const decoded = try decompress(allocator, replay);
     defer allocator.free(decoded);
     const frames = try parseFrames(allocator, decoded);
     errdefer allocator.free(frames);
     const played_to = frames[frames.len - 1].time_ms;
-    const parsed_map = try parseMap(allocator, map, mods, played_to);
+    const parsed_map = try parseMap(allocator, map, mods, played_to, native_difficulty);
     return .{
         .allocator = allocator,
         .frames = frames,
@@ -212,7 +222,7 @@ pub fn contentDigest(frames: []const abi.ReplayFrameV1) [32]u8 {
     return digest;
 }
 
-fn parseMap(allocator: std.mem.Allocator, map: []const u8, mods: u64, played_to_ms: i64) !ParsedMap {
+fn parseMap(allocator: std.mem.Allocator, map: []const u8, mods: u64, played_to_ms: i64, native_difficulty: bool) !ParsedMap {
     if (map.len == 0 or map.len > 32 * 1024 * 1024) return error.InvalidBeatmap;
     const contents = beatmap.withoutUtf8Bom(map);
     if (!std.mem.startsWith(u8, contents, "osu file format v")) return error.InvalidBeatmap;
@@ -240,8 +250,14 @@ fn parseMap(allocator: std.mem.Allocator, map: []const u8, mods: u64, played_to_
                 mode = std.fmt.parseInt(u8, value, 10) catch return error.InvalidBeatmap;
             },
             .difficulty => if (valueFor(line, "OverallDifficulty")) |value| {
-                overall_difficulty = std.fmt.parseFloat(f64, value) catch return error.InvalidBeatmap;
-                if (!std.math.isFinite(overall_difficulty) or overall_difficulty < 0 or overall_difficulty > 10) return error.InvalidBeatmap;
+                if (native_difficulty) {
+                    const native_od = std.fmt.parseFloat(f32, value) catch return error.InvalidBeatmap;
+                    if (!std.math.isFinite(native_od)) return error.InvalidBeatmap;
+                    overall_difficulty = std.math.clamp(native_od, @as(f32, 0), @as(f32, 10));
+                } else {
+                    overall_difficulty = std.fmt.parseFloat(f64, value) catch return error.InvalidBeatmap;
+                    if (!std.math.isFinite(overall_difficulty) or overall_difficulty < 0 or overall_difficulty > 10) return error.InvalidBeatmap;
+                }
             },
             .hit_objects => {
                 var fields = std.mem.splitScalar(u8, line, ',');
@@ -337,5 +353,22 @@ test "stable map evidence rejects ambiguous primary object kinds" {
         "[General]\nMode:0\n" ++
         "[Difficulty]\nOverallDifficulty:5\n" ++
         "[HitObjects]\n256,192,1000,3,0,0:0:0:0:\n";
-    try std.testing.expectError(error.InvalidBeatmap, parseMap(std.testing.allocator, map, 0, 2000));
+    try std.testing.expectError(error.InvalidBeatmap, parseMap(std.testing.allocator, map, 0, 2000, false));
+}
+
+test "native map preparation clamps finite base OD without changing Stable window preparation" {
+    for ([_][]const u8{ "-1", "19.5" }, [_]u32{ 200, 100 }) |value, expected| {
+        const map = try std.fmt.allocPrint(std.testing.allocator, "osu file format v14\n[General]\nMode:0\n[Difficulty]\nOverallDifficulty:{s}\n[HitObjects]\n256,192,1000,1,0,0:0:0:0:\n", .{value});
+        defer std.testing.allocator.free(map);
+        const parsed = try parseMap(std.testing.allocator, map, 0, 2000, true);
+        defer std.testing.allocator.free(parsed.objects);
+        try std.testing.expectEqual(expected, parsed.hit_window_ms);
+        try std.testing.expectEqual(@as(u32, 1), parsed.map_object_count);
+        try std.testing.expectError(error.InvalidBeatmap, parseMap(std.testing.allocator, map, 0, 2000, false));
+    }
+    for ([_][]const u8{ "nan", "inf", "-inf", "1e40", "bad" }) |value| {
+        const map = try std.fmt.allocPrint(std.testing.allocator, "osu file format v14\n[General]\nMode:0\n[Difficulty]\nOverallDifficulty:{s}\n[HitObjects]\n256,192,1000,1,0,0:0:0:0:\n", .{value});
+        defer std.testing.allocator.free(map);
+        try std.testing.expectError(error.InvalidBeatmap, parseMap(std.testing.allocator, map, 0, 2000, true));
+    }
 }

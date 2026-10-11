@@ -153,7 +153,7 @@ pub fn observeLazerGameplay(self: anytype, user_id: i32, score: lazer.ScoreInput
         anticheat_replay.validatePayload(self.allocator, info.frames, @intCast(score.ruleset_id)) catch |err| return if (err == error.OutOfMemory) .unavailable else .invalid_replay;
         return .none;
     }
-    var prepared = anticheat_replay.prepare(self.allocator, info.frames, map, info.mods) catch |err| {
+    var prepared = anticheat_replay.prepareNative(self.allocator, info.frames, map, info.mods) catch |err| {
         std.log.warn("event=anticheat_lazer_replay_prepare_failed user_id={d} error={t}", .{ user_id, err });
         return switch (err) {
             error.InvalidReplay => .invalid_replay,
